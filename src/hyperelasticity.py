@@ -72,7 +72,7 @@ pi_e = - ufl.inner(B, u) * dx
 pi = pi_i + pi_e
 
 Ffunc = ufl.derivative(pi, u, v) + ufl.derivative(pi, p, q)
-#Ffunc = ufl.inner(ufl.grad(v) + p*J*ufl.compound_expressions.inverse_expr(F.T), P) * dx + q * (J - 1) * dx - ufl.inner(B, v) * dx
+#Ffunc = ufl.inner(ufl.grad(v), P + p*J*ufl.compound_expressions.inverse_expr(F.T)) * dx + q * (J - 1) * dx - ufl.inner(B, v) * dx
 
 states = [u, p]
 problem = NonlinearProblem(Ffunc, states, bcs)
