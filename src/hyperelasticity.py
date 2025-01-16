@@ -2,10 +2,9 @@ from dolfinx import fem, mesh, default_scalar_type, io, log
 import numpy as np
 from mpi4py import MPI
 import ufl
-from dolfinx.fem.petsc import NonlinearProblem
-from dolfinx.nls.petsc import NewtonSolver
+from scifem import NewtonSolver
 
-h = 0.75
+h = 0.5
 
 mesh_comm = MPI.COMM_WORLD
 Lx, Ly, Lz = 3, 7, 20 #mm
@@ -31,7 +30,8 @@ bcs = [fem.dirichletbc(u_bc, left_dofs, V)]
 
 u = fem.Function(V)
 p = fem.Function(Q)
-
+du = ufl.TrialFunction(V)
+dp = ufl.TrialFunction(Q)
 v = ufl.TestFunction(V)
 q = ufl.TestFunction(Q)
 
@@ -55,7 +55,7 @@ I4s = ufl.variable(ufl.dot(s0, ufl.dot(C, s0)))
 I8fs = ufl.variable(ufl.dot(s0, ufl.dot(C, f0)))
 a, b, af, bf = 2.28, 9.726, 1.685, 15.779
 
-T_a = ufl.variable(ufl.sin(ufl.pi * t))
+T_a = ufl.variable(30*ufl.sin(ufl.pi * t))
 
 def subplus(x):
     return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
@@ -63,39 +63,40 @@ def subplus(x):
 psi_p = a/(2*b) * (ufl.exp(b * (I1-3)) - 1) + af/(2*bf) * (ufl.exp(bf * subplus(I4f-1)**2) - 1)
 psi_a = T_a * J / 2 * (I4f - 1)
 psi = psi_p + psi_a 
-#P = ufl.diff(psi, F) + J * p * ufl.compound_expressions.inverse_expr(F.T)
 
 metadata = {'quadrature_degree': 4}
 dx = ufl.Measure('dx', domain=domain, metadata=metadata)
-pi_i = (p * (J - 1) + psi) * dx
-pi_e = - ufl.inner(B, u) * dx
-pi = pi_i + pi_e
 
-Ffunc = ufl.derivative(pi, u, v) + ufl.derivative(pi, p, q)
-#Ffunc = ufl.inner(ufl.grad(v), P + p*J*ufl.compound_expressions.inverse_expr(F.T)) * dx + q * (J - 1) * dx - ufl.inner(B, v) * dx
+L = psi * dx + p * (J - 1) * dx
+r_u = ufl.derivative(L, u, v) 
+r_p = ufl.derivative(L, p, q)
+R = [r_u, r_p]
+K = [
+    [ufl.derivative(r_u, u, du), ufl.derivative(r_u, p, dp)],
+    [ufl.derivative(r_p, u, du), ufl.derivative(r_p, p, dp)],
+]
 
-states = [u, p]
-problem = NonlinearProblem(Ffunc, states, bcs)
+petsc_options = {"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"}
+solver = NewtonSolver(R, K, [u, p], max_iterations=25, bcs=bcs, petsc_options=petsc_options)
 
-solver = NewtonSolver(domain.comm, problem)
-
-# Set Newton solver options
-solver.atol = 1e-8
-solver.rtol = 1e-8
-solver.convergence_criterion = "incremental"
 
 vtx = io.VTXWriter(MPI.COMM_WORLD, "active_stress.bp", [u], engine="BP4")
 
-log.set_log_level(log.LogLevel.INFO)
+def pre_solve(solver: NewtonSolver):
+    print(f"Starting solve with {solver.max_iterations} iterations")
 
-solver.solve(u)
+def post_solve(solver: NewtonSolver):
+    print(f"Solve completed in with correction norm {solver.dx.norm(0)}")
+solver.set_pre_solve_callback(pre_solve)
+solver.set_post_solve_callback(post_solve)
+
+solver.solve()
 vtx.write(t.value)
 T = 1
 dt = 0.1
 while t.value + dt < T:
     t.value += dt
-    num_its, converged = solver.solve(u)
-    assert(converged)
+    solver.solve()
     vtx.write(t.value)
 
 vtx.close
