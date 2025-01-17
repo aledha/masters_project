@@ -3,100 +3,133 @@ import numpy as np
 from mpi4py import MPI
 import ufl
 from scifem import NewtonSolver
+from dataclasses import dataclass
 
-h = 0.5
+@dataclass
+class HyperelasticProblem:
+    h: float 
+    lagrange_order: float
 
-mesh_comm = MPI.COMM_WORLD
-Lx, Ly, Lz = 3, 7, 20 #mm
-domain = mesh.create_box(mesh_comm, [[0,0,0], [Lx,Ly,Lz]], n = [int(Lx/h), int(Ly/h), int(Lz/h)])
+    def __post_init__(self):
+        self.bcs = []
+        self.states = []
+        self.teststates = []
+        self.trialstates = []
+        self.L = ufl.as_ufl(0.0)
 
-lagrange_order = 2
-V = fem.functionspace(domain, ("Lagrange", lagrange_order, (domain.geometry.dim, )))
-Q = fem.functionspace(domain, ("Lagrange", lagrange_order - 1))
+    def _init_functions(self):
+        self.u = fem.Function(self.V)
+        self.v = ufl.TestFunction(self.V)
+        self.du = ufl.TrialFunction(self.V)
 
-x = ufl.SpatialCoordinate(domain)
-t = fem.Constant(domain, 0.0)
+        self.states.append(self.u)
+        self.teststates.append(self.v)
+        self.trialstates.append(self.du)
+
+        self.d = len(self.u)
+        self.I = ufl.variable(ufl.Identity(self.d))
+        self.F = ufl.variable(self.I + ufl.grad(self.u))
+        self.C = ufl.variable(self.F.T * self.F)
+        self.J = ufl.variable(ufl.det(self.F))
+
+        self.B = fem.Constant(self.domain, default_scalar_type((0, 0, 0)))
+        self.T = fem.Constant(self.domain, default_scalar_type((0, 0, 0)))
+
+    def _init_invariants(self):
+        f0 = ufl.unit_vector(2, 3)
+        s0 = ufl.unit_vector(1, 3)
+
+        self.I1 = ufl.variable(ufl.tr(self.C))
+        self.I4f = ufl.variable(ufl.dot(f0, ufl.dot(self.C, f0)))
+        self.I4s = ufl.variable(ufl.dot(s0, ufl.dot(self.C, s0)))
+        self.I8fs = ufl.variable(ufl.dot(s0, ufl.dot(self.C, f0)))
+
+    def set_rectangular_domain(self, Lx, Ly, Lz):
+        mesh_comm = MPI.COMM_WORLD
+        self.domain = mesh.create_box(mesh_comm, [[0,0,0], [Lx,Ly,Lz]], n = [int(Lx/self.h), int(Ly/self.h), int(Lz/self.h)])
+        self.V = fem.functionspace(self.domain, ("Lagrange", self.lagrange_order, (self.domain.geometry.dim, )))    
+        self.x = ufl.SpatialCoordinate(self.domain)
+        metadata = {'quadrature_degree': 4}
+        self.dx = ufl.Measure('dx', domain=self.domain, metadata=metadata)
+        self._init_functions()
+        self._init_invariants()
+
+    def homogeneous_dirichlet(self, boundaries, vals = [0.0], tags = [1]):
+        for boundary, val, tag in zip(boundaries, vals, tags):
+            fdim = self.domain.topology.dim - 1
+            facets = mesh.locate_entities_boundary(self.domain, fdim, boundary)
+            facet_tag = mesh.meshtags(self.domain, fdim, facets, np.full_like(facets, tag))
+
+            u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
+            left_dofs = fem.locate_dofs_topological(self.V, facet_tag.dim, facet_tag.find(tag))
+            self.bcs.append(fem.dirichletbc(u_bc, left_dofs, self.V))
+    
+    def holzapfel_ogden_model(self):
+        def subplus(x):
+            return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
+
+        a, b, af, bf = 2.28, 9.726, 1.685, 15.779
+        psi_p = a/(2*b) * (ufl.exp(b * (self.I1-3)) - 1) + af/(2*bf) * (ufl.exp(bf * subplus(self.I4f-1)**2) - 1)
+        self.T_a = fem.Constant(self.domain, 0.0)
+        psi_a = self.T_a * self.J / 2 * (self.I4f - 1)      #eta=0
+        self.psi = psi_p + psi_a 
+        self.L += self.psi * self.dx
+        #TODO include traction and body force
+    
+    def set_tension(self, val):
+        self.T_a.value = val
+
+    def incompressible(self):
+        self.Q = fem.functionspace(self.domain, ("Lagrange", self.lagrange_order - 1)) 
+        self.p = fem.Function(self.Q)
+        self.dp = ufl.TrialFunction(self.Q)
+        self.q = ufl.TestFunction(self.Q)
+
+        self.states.append(self.p)
+        self.teststates.append(self.q)
+        self.trialstates.append(self.dp)
+        self.L += self.p * (self.J-1) * self.dx
+
+    def setup_solver(self):
+        # Residuals
+        R = []
+        for state, teststate in zip(self.states, self.teststates):
+            R.append(ufl.derivative(self.L, state, teststate))
+
+        # Jacobian
+        K = []
+        for r in R:
+            Kr = []
+            for state, trialstate in zip(self.states, self.trialstates):
+                Kr.append(ufl.derivative(r, state, trialstate))
+            K.append(Kr)
+
+        petsc_options = {"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"}
+        self.solver = NewtonSolver(R, K, self.states, max_iterations=25, bcs=self.bcs, petsc_options=petsc_options)
+        def post_solve(solver: NewtonSolver):
+            print(f"Solve completed in with correction norm {solver.dx.norm(0)}")
+        self.solver.set_post_solve_callback(post_solve)
+
+    def solve(self):
+        self.solver.solve()
 
 def left(x):
     return np.isclose(x[2], 0)
 
-fdim = domain.topology.dim - 1
-facets = mesh.locate_entities_boundary(domain, fdim, left)
-facet_tag = mesh.meshtags(domain, fdim, facets, np.full_like(facets, 1))
-
-u_bc = np.array((0,) * domain.geometry.dim, dtype=default_scalar_type)
-left_dofs = fem.locate_dofs_topological(V, facet_tag.dim, facet_tag.find(1))
-bcs = [fem.dirichletbc(u_bc, left_dofs, V)]
-
-u = fem.Function(V)
-p = fem.Function(Q)
-du = ufl.TrialFunction(V)
-dp = ufl.TrialFunction(Q)
-v = ufl.TestFunction(V)
-q = ufl.TestFunction(Q)
-
-d = len(u)
-I = ufl.variable(ufl.Identity(d))
-F = ufl.variable(I + ufl.grad(u))
-C = ufl.variable(F.T * F)
-J = ufl.variable(ufl.det(F))
-
-B = fem.Constant(domain, default_scalar_type((0, 0, 0)))
-T = fem.Constant(domain, default_scalar_type((0, 0, 0)))
-
-# Invariants
-f0 = ufl.unit_vector(2, 3)
-s0 = ufl.unit_vector(1, 3)
-n0 = ufl.unit_vector(0, 3)
-
-I1 = ufl.variable(ufl.tr(C))
-I4f = ufl.variable(ufl.dot(f0, ufl.dot(C, f0)))
-I4s = ufl.variable(ufl.dot(s0, ufl.dot(C, s0)))
-I8fs = ufl.variable(ufl.dot(s0, ufl.dot(C, f0)))
-a, b, af, bf = 2.28, 9.726, 1.685, 15.779
-
-T_a = ufl.variable(30*ufl.sin(ufl.pi * t))
-
-def subplus(x):
-    return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
-
-psi_p = a/(2*b) * (ufl.exp(b * (I1-3)) - 1) + af/(2*bf) * (ufl.exp(bf * subplus(I4f-1)**2) - 1)
-psi_a = T_a * J / 2 * (I4f - 1)
-psi = psi_p + psi_a 
-
-metadata = {'quadrature_degree': 4}
-dx = ufl.Measure('dx', domain=domain, metadata=metadata)
-
-L = psi * dx + p * (J - 1) * dx
-r_u = ufl.derivative(L, u, v) 
-r_p = ufl.derivative(L, p, q)
-R = [r_u, r_p]
-K = [
-    [ufl.derivative(r_u, u, du), ufl.derivative(r_u, p, dp)],
-    [ufl.derivative(r_p, u, du), ufl.derivative(r_p, p, dp)],
-]
-
-petsc_options = {"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"}
-solver = NewtonSolver(R, K, [u, p], max_iterations=25, bcs=bcs, petsc_options=petsc_options)
+problem = HyperelasticProblem(0.75, 2)
+problem.set_rectangular_domain(3, 7, 20)
+problem.homogeneous_dirichlet([left])
+problem.holzapfel_ogden_model()
+problem.incompressible()
+problem.setup_solver()
 
 
-vtx = io.VTXWriter(MPI.COMM_WORLD, "active_stress.bp", [u], engine="BP4")
-
-def pre_solve(solver: NewtonSolver):
-    print(f"Starting solve with {solver.max_iterations} iterations")
-
-def post_solve(solver: NewtonSolver):
-    print(f"Solve completed in with correction norm {solver.dx.norm(0)}")
-solver.set_pre_solve_callback(pre_solve)
-solver.set_post_solve_callback(post_solve)
-
-solver.solve()
-vtx.write(t.value)
-T = 1
-dt = 0.1
-while t.value + dt < T:
-    t.value += dt
-    solver.solve()
-    vtx.write(t.value)
-
+vtx = io.VTXWriter(MPI.COMM_WORLD, "active_stress.bp", [problem.u], engine="BP4")
+T_as = np.linspace(0, 100, 11)
+for T_a in T_as:
+    problem.set_tension(T_a)
+    problem.solve()
+    for i in range(10):
+        vtx.write(T_a + i) 
+    print(f"Solved for T_a={T_a}")
 vtx.close
