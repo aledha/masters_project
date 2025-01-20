@@ -5,6 +5,8 @@ import ufl
 from scifem import NewtonSolver
 from dataclasses import dataclass
 
+import ufl.geometry
+
 @dataclass
 class HyperelasticProblem:
     h: float 
@@ -54,16 +56,29 @@ class HyperelasticProblem:
         self._init_functions()
         self._init_invariants()
 
-    def homogeneous_dirichlet(self, boundaries, vals = [0.0], tags = [1]):
-        for boundary, val, tag in zip(boundaries, vals, tags):
-            fdim = self.domain.topology.dim - 1
+    def boundary_conditions(self, boundaries, vals = [0.0, -1.0], tags = [1, 2], bc_types=['d', 'n']):
+        fdim = self.domain.topology.dim - 1
+        marked_facets = np.array([])
+        marked_values = np.array([])
+        for boundary, tag in zip(boundaries, tags):
             facets = mesh.locate_entities_boundary(self.domain, fdim, boundary)
-            facet_tag = mesh.meshtags(self.domain, fdim, facets, np.full_like(facets, tag))
+            marked_facets = np.hstack([marked_facets, facets])
+            marked_values = np.hstack([marked_values, np.full_like(facets, tag)])
+        sorted_facets = np.argsort(marked_facets)
+        facet_tag = mesh.meshtags(self.domain, fdim, marked_facets[sorted_facets], marked_values[sorted_facets])
 
-            u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
-            left_dofs = fem.locate_dofs_topological(self.V, facet_tag.dim, facet_tag.find(tag))
-            self.bcs.append(fem.dirichletbc(u_bc, left_dofs, self.V))
-    
+        ds = ufl.Measure('ds', domain=self.domain, subdomain_data=facet_tag, metadata={'quadrature_degree': 4})
+        N = ufl.geometry.FacetNormal(self.domain)
+        for val, tag, bc_type in zip(vals, tags, bc_types):
+            if bc_type == 'd':
+                u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
+                dofs = fem.locate_dofs_topological(self.V, facet_tag.dim, facet_tag.find(tag))
+                self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
+            elif bc_type == 'n':
+                t = fem.Constant(self.domain, default_scalar_type(val))
+                #n = t * self.J * ufl.inv(self.F).T * N   
+                self.L -= - ufl.inner(t * N, self.u) * ds(tag)
+        
     def holzapfel_ogden_model(self):
         def subplus(x):
             return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
@@ -113,12 +128,15 @@ class HyperelasticProblem:
     def solve(self):
         self.solver.solve()
 
-def left(x):
-    return np.isclose(x[2], 0)
 
 problem = HyperelasticProblem(0.75, 2)
 problem.set_rectangular_domain(3, 7, 20)
-problem.homogeneous_dirichlet([left])
+def left(x):
+    return np.isclose(x[2], 0)
+def right(x):
+    return np.isclose(x[2], 20)
+
+problem.boundary_conditions([left, right], vals=[0.0, -1.0], tags=[1, 2], bc_types=['d', 'n'])
 problem.holzapfel_ogden_model()
 problem.incompressible()
 problem.setup_solver()
