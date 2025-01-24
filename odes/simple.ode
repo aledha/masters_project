@@ -1,0 +1,5 @@
+states(v = 1.0, s = 2.0)
+
+# Time derivatives
+dv_dt = -s
+ds_dt = v
