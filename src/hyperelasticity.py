@@ -4,13 +4,12 @@ from mpi4py import MPI
 import ufl
 from scifem import NewtonSolver
 from dataclasses import dataclass
-
 import ufl.geometry
 
 @dataclass
 class HyperelasticProblem:
     h: float 
-    lagrange_order: float
+    lagrange_order: int
 
     def __post_init__(self):
         self.bcs = []
@@ -81,8 +80,7 @@ class HyperelasticProblem:
                 self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
             elif bc_type == 'n':    # Neumann
                 t = fem.Constant(self.domain, default_scalar_type(val))
-                n = t * self.J * ufl.inv(self.F).T * N   
-                self.R_neumann += ufl.inner(n, self.v) * ds(tag)
+                self.R_neumann += ufl.inner(t*N, self.v) * ds(tag)
         
     def holzapfel_ogden_model(self):
         def subplus(x):
@@ -126,35 +124,12 @@ class HyperelasticProblem:
         petsc_options = {"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"}
         self.solver = NewtonSolver(R, K, self.states, max_iterations=25, bcs=self.bcs, petsc_options=petsc_options)
         def post_solve(solver: NewtonSolver):
-            print(f"Solve completed in with correction norm {solver.dx.norm(0)}")
+            norm = solver.dx.norm(0)
+            if self.domain.comm.rank == 0:
+                print(f"Solve completed in with correction norm {norm}")
         self.solver.set_post_solve_callback(post_solve)
 
     def solve(self):
         self.solver.solve()
-
-problem = HyperelasticProblem(0.2, 2)
-problem.set_rectangular_domain(1, 1, 1, 0, 1)
-
-def left(x):
-    return np.isclose(x[0], 0)
-def right(x):
-    return np.isclose(x[0], 1)
-
-problem.boundary_conditions([left, right], vals=[0.0, -1.0], tags=[1, 2], bc_types=['d', 'n'])
-problem.holzapfel_ogden_model()
-problem.incompressible()
-problem.setup_solver()
-
-vtx = io.VTXWriter(MPI.COMM_WORLD, "unit_cube.bp", [problem.u], engine="BP4")
-problem.set_tension(2.0)
-problem.solve()
-vtx.write(0.0)
-vtx.close()
-# T_as = np.linspace(0, 100, 11)
-# for T_a in T_as:
-#     problem.set_tension(T_a)
-#     problem.solve()
-#     for i in range(10):
-#         vtx.write(T_a + i) 
-#     print(f"Solved for T_a={T_a}")
-# vtx.close
+        self.u.x.scatter_forward()
+        self.p.x.scatter_forward()
