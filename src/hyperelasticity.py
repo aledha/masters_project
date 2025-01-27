@@ -56,6 +56,21 @@ class HyperelasticProblem:
         self._init_functions()
         self._init_invariants(f_dir, s_dir)
 
+    def _dirichlet1(self, val, tag, facet_tag):
+        u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
+        dofs = fem.locate_dofs_topological(self.V, facet_tag.dim, facet_tag.find(tag))
+        self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
+    
+    def _dirichlet2(self, val, tag, facet_tag):
+        dofs = fem.locate_dofs_topological(self.V.sub(val), facet_tag.dim, facet_tag.find(tag))
+        self.bcs.append(fem.dirichletbc(default_scalar_type(0), dofs, self.V.sub(val)))
+
+    def _neumann(self, val, tag, facet_tag):
+        ds = ufl.Measure('ds', domain=self.domain, subdomain_data=facet_tag, metadata={'quadrature_degree': 4})
+        N = ufl.geometry.FacetNormal(self.domain)
+        t = fem.Constant(self.domain, default_scalar_type(val))
+        self.R_neumann += ufl.inner(t*N, self.v) * ds(tag)
+
     def boundary_conditions(self, boundaries, vals = [0.0, -1.0], tags = [1, 2], bc_types=['d', 'n']):
         fdim = self.domain.topology.dim - 1
         marked_facets = np.array([])
@@ -70,18 +85,17 @@ class HyperelasticProblem:
                                   marked_facets[sorted_facets].astype(np.int32), 
                                   marked_values[sorted_facets].astype(np.int32))
 
-        ds = ufl.Measure('ds', domain=self.domain, subdomain_data=facet_tag, metadata={'quadrature_degree': 4})
-        N = ufl.geometry.FacetNormal(self.domain)
         self.R_neumann = ufl.as_ufl(0)
         for val, tag, bc_type in zip(vals, tags, bc_types):
-            if bc_type == 'd':      # Dirichlet
-                u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
-                dofs = fem.locate_dofs_topological(self.V, facet_tag.dim, facet_tag.find(tag))
-                self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
+            if bc_type == 'd1':     # Dirichlet type 1
+                self._dirichlet1(val, tag, facet_tag)
+            elif bc_type == 'd2':   # Dirichlet type 2 
+                self._dirichlet2(val, tag, facet_tag)
             elif bc_type == 'n':    # Neumann
-                t = fem.Constant(self.domain, default_scalar_type(val))
-                self.R_neumann += ufl.inner(t*N, self.v) * ds(tag)
-        
+                self._neumann(val, tag, facet_tag)
+            else:
+                raise TypeError('Unknown boundary condition type')
+
     def holzapfel_ogden_model(self):
         def subplus(x):
             return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
