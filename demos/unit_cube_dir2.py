@@ -19,10 +19,9 @@ def right(x):
     return np.isclose(x[0], 1)
 boundaries = [left, front, bottom, right]
 vals = [0, 1, 2, -1.0]
-tags = [1, 2, 3, 4]
 bc_types = ['d2', 'd2', 'd2', 'n']
 
-problem.boundary_conditions(boundaries, vals, tags, bc_types)
+problem.boundary_conditions(boundaries, vals, bc_types)
 problem.holzapfel_ogden_model()
 problem.incompressible()
 problem.setup_solver()

@@ -15,7 +15,7 @@ def left(x):
 def right(x):
     return np.isclose(x[0], 1)
 
-problem.boundary_conditions([left, right], vals=[0.0, -1.0], tags=[1, 2], bc_types=['d1', 'n'])
+problem.boundary_conditions([left, right], vals=[0.0, -1.0], bc_types=['d1', 'n'])
 problem.holzapfel_ogden_model()
 problem.incompressible()
 problem.setup_solver()

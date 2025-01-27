@@ -71,7 +71,20 @@ class HyperelasticProblem:
         t = fem.Constant(self.domain, default_scalar_type(val))
         self.R_neumann += ufl.inner(t*N, self.v) * ds(tag)
 
-    def boundary_conditions(self, boundaries, vals = [0.0, -1.0], tags = [1, 2], bc_types=['d', 'n']):
+    def boundary_conditions(self, boundaries, vals, bc_types, tags = None):
+        """Apply Dirichlet (type 1 or 2) and/or Neumann boundary conditions
+
+        Args:
+            boundaries (list of callables): functions that returns boolean of coordinate is near boundary
+            vals (list of floats): 
+                if Dirichlet type 1: value to hold u at
+                if Dirichlet type 2: dimension to restrict u
+                if Neumann: traction value 
+            bc_types (list of strings): choice of boundary conditions: d1 (dirichlet type 1), d2 (dirichlet type 2), or n (neumann)
+            tags (list of ints): tags to assign boundary. Defaults to None, in which case it will be assigned automatically
+        """
+        if not tags:
+            tags = range(1, len(boundaries) + 1)
         fdim = self.domain.topology.dim - 1
         marked_facets = np.array([])
         marked_values = np.array([])
