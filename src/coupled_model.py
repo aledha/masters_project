@@ -1,16 +1,15 @@
+import adios4dolfinx
 from dolfinx import fem, mesh, default_scalar_type, io, log
-import numpy as np
 from mpi4py import MPI
-import ufl
-from scifem import NewtonSolver
 from dataclasses import dataclass
-import ufl.geometry
-
-import hyperelasticity, monodomain
+import src.monodomain as monodomain
+import src.hyperelasticity as hyperelasticity
 import gotranx
-import importlib
+
 import sys
 from pathlib import Path
+
+import adios4dolfinx
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -24,19 +23,42 @@ def translateODE(odeFileName, schemes):
     else:
         print("ODE already translated")
 
-translateODE('land', [gotranx.schemes.Scheme.generalized_rush_larsen])
+#translateODE('tentusscher_land_1way', [gotranx.schemes.Scheme.generalized_rush_larsen])
 
 @dataclass
 class WeaklyCoupledModel:
     ep: monodomain.MonodomainSolver
-    mech: hyperelasticity.HyperelasticProblem
+    #mech: hyperelasticity.HyperelasticProblem
 
     def __post_init__(self):
-        self.cai_ep_index = self.ep.ode.model.state_index('Ca_i')
-        self.cai_mech_index = self.mech.model.state_index('cai')
+        self.t = self.ep.t
+        self.dt = self.ep.dt
+        self.domain = self.ep.domain
+        self.Ta_index = self.ep.ode.model.monitor_index("Ta")
+        self.Ta_space = fem.functionspace(self.domain, ("DG", 1))
+        self.Ta = fem.Function(self.Ta_space)
+        self.Ta_lagrange = fem.Function(self.ep.pde.V)
 
-    def _cai_to_mech(self):
-        # TODO: interpolate to allow coarser mech mesh
-        self.mech.states[self.cai_mech_index, :] = self.ep.ode.states[self.cai_ep_index, :]
+        with io.XDMFFile(MPI.COMM_WORLD, "Ta.xdmf", "w") as xdmf:
+            xdmf.write_mesh(self.ep.domain)
+
+    def _save_Ta(self):
+        Ta_array = self.ep.ode.model.monitor_values(self.t.value, 
+                                              self.ep.ode.states, 
+                                              self.ep.ode.params)[self.Ta_index]
+        self.Ta_lagrange.x.array[:] = Ta_array
+        self.Ta.interpolate(self.Ta_lagrange)
+
+        adios4dolfinx.write_function_on_input_mesh("Ta.bp",
+                                                   self.Ta,
+                                                   mode=adios4dolfinx.adios2_helpers.adios2.Mode.Write,
+                                                   time=self.t.value,
+                                                   name="Ta")
+
+    def solve_ep_save_Ta(self, T):
+        while self.t.value < T + self.dt:
+            self.ep.step()
+            self._save_Ta()
+            print("Solved for t = ", self.t.value)
 
 
