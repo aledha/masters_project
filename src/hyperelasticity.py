@@ -5,6 +5,7 @@ import ufl
 from scifem import NewtonSolver
 from dataclasses import dataclass
 import ufl.geometry
+import importlib
 
 @dataclass
 class HyperelasticProblem:
@@ -21,6 +22,7 @@ class HyperelasticProblem:
     def _init_functions(self):
         self.V = fem.functionspace(self.domain, ("Lagrange", self.lagrange_order, (self.domain.geometry.dim, )))    
         self.x = ufl.SpatialCoordinate(self.domain)
+        self.t = fem.Constant(self.domain, 0.0)
         metadata = {'quadrature_degree': 4}
         self.dx = ufl.Measure('dx', domain=self.domain, metadata=metadata)
 
@@ -55,6 +57,19 @@ class HyperelasticProblem:
         self.domain = mesh.create_box(mesh_comm, [[0,0,0], [Lx,Ly,Lz]], n = [int(Lx/self.h), int(Ly/self.h), int(Lz/self.h)])
         self._init_functions()
         self._init_invariants(f_dir, s_dir)
+
+    def land_model(self, odefile, scheme):
+        num_nodes = self.V.dofmap.index_map.size_global
+        try:
+            self.model = importlib.import_module(f"odes.{odefile}")
+        except ImportError as e:
+            raise ImportError(f"Failed to import {odefile}: {e}")
+        
+        init = self.model.init_state_values()
+        self.states = np.tile(init, (num_nodes, 1)).T
+        self.params = self.model.init_parameter_values()
+        self.odesolver = getattr(self.model, scheme)
+        self.Ta_index = self.model.monitor_index('Ta')
 
     def _dirichlet1(self, val, tag, facet_tag):
         u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
@@ -109,20 +124,6 @@ class HyperelasticProblem:
             else:
                 raise TypeError('Unknown boundary condition type')
 
-    def holzapfel_ogden_model(self):
-        def subplus(x):
-            return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
-
-        a, b, af, bf = 2.28, 9.726, 1.685, 15.779
-        psi_p = a/(2*b) * (ufl.exp(b * (self.I1-3)) - 1) + af/(2*bf) * (ufl.exp(bf * subplus(self.I4f-1)**2) - 1)
-        self.T_a = fem.Constant(self.domain, 0.0)
-        psi_a = self.T_a * self.J / 2 * (self.I4f - 1)      #eta=0
-        self.psi = psi_p + psi_a 
-        self.L += self.psi * self.dx
-
-    def set_tension(self, val):
-        self.T_a.value = val
-
     def incompressible(self):
         self.Q = fem.functionspace(self.domain, ("Lagrange", self.lagrange_order - 1)) 
         self.p = fem.Function(self.Q)
@@ -133,6 +134,24 @@ class HyperelasticProblem:
         self.teststates.append(self.q)
         self.trialstates.append(self.dp)
         self.L += self.p * (self.J-1) * self.dx
+
+    def holzapfel_ogden_model(self, Ta_const = None):
+        def subplus(x):
+            return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
+
+        a, b, af, bf = 2.28, 9.726, 1.685, 15.779
+        psi_p = a/(2*b) * (ufl.exp(b * (self.I1-3)) - 1) + af/(2*bf) * (ufl.exp(bf * subplus(self.I4f-1)**2) - 1)
+        if Ta_const:
+            self.Ta = fem.Constant(Ta_const)
+        else:
+            self.Ta = fem.Function(self.Q)
+        psi_a = self.Ta * self.J / 2 * (self.I4f - 1)      #eta=0
+        self.psi = psi_p + psi_a 
+        self.L += self.psi * self.dx
+
+    def set_tension(self):
+        Ta_array = self.model.monitor_values(self.t, self.states, self.params)
+        self.Ta.interpolate(Ta_array)
 
     def setup_solver(self):
         # Residuals
@@ -155,6 +174,9 @@ class HyperelasticProblem:
             if self.domain.comm.rank == 0:
                 print(f"Solve completed in with correction norm {norm}")
         self.solver.set_post_solve_callback(post_solve)
+
+    def ode_step(self):
+        self.states[:] = self.odesolver(self.states, self.t, self.dt, self.params)
 
     def solve(self):
         self.solver.solve()
