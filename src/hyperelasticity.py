@@ -159,8 +159,8 @@ class HyperelasticProblem:
                 print(f"Solve completed in with correction norm {norm}")
         self.solver.set_post_solve_callback(post_solve)
 
-    def set_tension(self, Ta_array):
-        self.Ta.interpolate(Ta_array)
+    def set_tension(self, tension):
+        self.Ta.interpolate(tension)
 
     def solve(self):
         self.solver.solve()

@@ -28,7 +28,7 @@ def translateODE(odeFileName, schemes):
 @dataclass
 class WeaklyCoupledModel:
     ep: monodomain.MonodomainSolver
-    #mech: hyperelasticity.HyperelasticProblem
+    mech: hyperelasticity.HyperelasticProblem
 
     def __post_init__(self):
         self.t = self.ep.t
@@ -36,8 +36,9 @@ class WeaklyCoupledModel:
         self.domain = self.ep.domain
         self.Ta_index = self.ep.ode.model.monitor_index("Ta")
         self.Ta_space = fem.functionspace(self.domain, ("DG", 1))
-        self.Ta = fem.Function(self.Ta_space)
         self.Ta_lagrange = fem.Function(self.ep.pde.V)
+        self.Ta = self.mech.Ta
+        #fem.Function(self.Ta_space)
 
         with io.XDMFFile(MPI.COMM_WORLD, "Ta.xdmf", "w") as xdmf:
             xdmf.write_mesh(self.ep.domain)
@@ -60,5 +61,31 @@ class WeaklyCoupledModel:
             self.ep.step()
             self._save_Ta()
             print("Solved for t = ", self.t.value)
+
+    def transfer_Ta(self):
+        Ta_array = self.ep.ode.model.monitor_values(self.t.value, 
+                                              self.ep.ode.states, 
+                                              self.ep.ode.params)[self.Ta_index]
+        self.Ta_lagrange.x.array[:] = Ta_array
+        self.mech.set_tension(self.Ta_lagrange)
+        #self.Ta.interpolate(self.Ta_lagrange)
+
+    def solve(self, T, N = 10, save_displacement = False):
+        if save_displacement: 
+            vtx = io.VTXWriter(MPI.COMM_WORLD, "coupling1way.bp", [self.mech.u, self.ep.pde.vn], engine="BP4")
+        n = 0
+        while self.t.value < T + self.dt:
+            n += 1
+            self.ep.step()
+            if n % N == 0:
+                self.transfer_Ta()
+                self.mech.solve()
+            if self.domain.comm.rank == 0:
+                print(f"Solved for t={self.t.value}")
+            if save_displacement:
+                vtx.write(self.t.value)
+        if save_displacement:
+            vtx.close()
+
 
 
