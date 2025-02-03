@@ -35,10 +35,8 @@ class WeaklyCoupledModel:
         self.dt = self.ep.dt
         self.domain = self.ep.domain
         self.Ta_index = self.ep.ode.model.monitor_index("Ta")
-        self.Ta_space = fem.functionspace(self.domain, ("DG", 1))
         self.Ta_lagrange = fem.Function(self.ep.pde.V)
         self.Ta = self.mech.Ta
-        #fem.Function(self.Ta_space)
 
         with io.XDMFFile(MPI.COMM_WORLD, "Ta.xdmf", "w") as xdmf:
             xdmf.write_mesh(self.ep.domain)
@@ -63,12 +61,14 @@ class WeaklyCoupledModel:
             print("Solved for t = ", self.t.value)
 
     def transfer_Ta(self):
+        # Now I am saving T_a to a function defined on the EP pde space, 
+        # and then interpolating it into the T_a space (DG, 0).
+        #? Is this okay? Maybe problems when using different meshes?
         Ta_array = self.ep.ode.model.monitor_values(self.t.value, 
                                               self.ep.ode.states, 
                                               self.ep.ode.params)[self.Ta_index]
         self.Ta_lagrange.x.array[:] = Ta_array
         self.mech.set_tension(self.Ta_lagrange)
-        #self.Ta.interpolate(self.Ta_lagrange)
 
     def solve(self, T, N = 10, save_displacement = False):
         if save_displacement: 

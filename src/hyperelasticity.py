@@ -116,7 +116,7 @@ class HyperelasticProblem:
             else:
                 raise TypeError('Unknown boundary condition type')
 
-    def incompressible(self):
+    def _incompressible(self):
         self.Q = fem.functionspace(self.domain, ("Lagrange", self.lagrange_order - 1)) 
         self.p = fem.Function(self.Q)
         self.dp = ufl.TrialFunction(self.Q)
@@ -127,7 +127,7 @@ class HyperelasticProblem:
         self.trialstates.append(self.dp)
         self.L += self.p * (self.J-1) * self.dx
 
-    def holzapfel_ogden_model(self):
+    def _holzapfel_ogden_model(self):
         def subplus(x):
             return ufl.conditional(ufl.ge(x, 0.0), x, 0.0)
 
@@ -138,6 +138,8 @@ class HyperelasticProblem:
         self.L += self.psi * self.dx
 
     def setup_solver(self):
+        self._incompressible()
+        self._holzapfel_ogden_model()
         # Residuals
         R = []
         for state, teststate in zip(self.states, self.teststates):
@@ -160,7 +162,12 @@ class HyperelasticProblem:
         self.solver.set_post_solve_callback(post_solve)
 
     def set_tension(self, tension):
-        self.Ta.interpolate(tension)
+        if isinstance(tension, float):
+            # ? better way to set function equal to constant?
+            self.Ta.interpolate(lambda x: tension + 0*x[0])
+        else:
+            # todo: allow different meshes
+            self.Ta.interpolate(tension)
 
     def solve(self):
         self.solver.solve()

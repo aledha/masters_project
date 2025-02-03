@@ -18,25 +18,25 @@ def solve(h, lagrange_order=2, save_solution=False):
         return np.isclose(x[0], 1)
 
     problem.boundary_conditions([left, right], vals=[0.0, 0], bc_types=['d1', 'n'])
-    problem.holzapfel_ogden_model()
-    problem.incompressible()
+    problem.setup_solver()
     def tension(x):
         return 5 * np.exp(-5*((x[1]-0.5)**2 + (x[2]-0.5)**2))
     problem.set_tension(tension)
-    problem.setup_solver()
 
     if save_solution:
+        # Save reference configuration
         vtx = io.VTXWriter(MPI.COMM_WORLD, "convergence.bp", [problem.u], engine="BP4")
         vtx.write(0.0)
     problem.solve()
     if save_solution:
+        # Save current configuration
         vtx.write(0.1)
         vtx.close()
     return problem.u
 
-def L2_error_with_exact(h, u_fine, compute_in_coarse_space = True, lagrange_order = 2):
-    # Approximating the coarser solution into finer function space and computing error there?
-    # Should it be opposite?
+def L2_diff_coarse_fine(h, u_fine, compute_in_coarse_space = True, lagrange_order = 2):
+    # ? Interpolate the coarser solution into finer mesh and compute error there?
+    # ? Should it be opposite?
     u_coarse = solve(h, lagrange_order)
     if compute_in_coarse_space:
         u_fine_interp = fem.Function(u_coarse.function_space)
@@ -63,9 +63,9 @@ def convergence_plot(h_exact, hs, plot_title, compute_in_coarse_space=True, lagr
     u_fine = solve(h_exact)
     errors = np.zeros_like(hs)
     for i in range(len(hs)):
-        errors[i] = L2_error_with_exact(hs[i], 
+        errors[i] = L2_diff_coarse_fine(hs[i], 
                                         u_fine, 
-                                        compute_in_coarse_space=compute_in_coarse_space,
+                                        compute_in_coarse_space = compute_in_coarse_space,
                                         lagrange_order = lagrange_order)
 
     order = (np.log(errors[-1]) - np.log(errors[-2])) / (np.log(hs[-1]) - np.log(hs[-2]))

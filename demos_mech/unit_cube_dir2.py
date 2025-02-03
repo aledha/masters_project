@@ -22,8 +22,6 @@ vals = [0, 1, 2, -1.0]
 bc_types = ['d2', 'd2', 'd2', 'n']
 
 problem.boundary_conditions(boundaries, vals, bc_types)
-problem.holzapfel_ogden_model()
-problem.incompressible()
 problem.setup_solver()
 
 vtx = io.VTXWriter(MPI.COMM_WORLD, "unit_cube_dir2.bp", [problem.u], engine="BP4")

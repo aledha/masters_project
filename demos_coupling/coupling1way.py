@@ -90,8 +90,6 @@ boundaries = [left, front, bottom]
 vals = [0, 1, 2]
 bc_types = ['d2', 'd2', 'd2']
 mech_solver.boundary_conditions(boundaries, vals, bc_types)
-mech_solver.holzapfel_ogden_model()
-mech_solver.incompressible()
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
