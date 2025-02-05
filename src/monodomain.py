@@ -9,7 +9,6 @@ from pathlib import Path
 from dataclasses import dataclass
 import importlib
 import sys
-from scifem import evaluate_function
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -80,8 +79,8 @@ class PDESolver:
     
     def solve_pde_step(self):
         self.b.x.array[:] = 0
-        petsc.assemble_vector(self.b.vector, self.compiled_L)
-        self.solver.solve(self.b.vector, self.vn.vector)
+        petsc.assemble_vector(self.b.x.petsc_vec, self.compiled_L)
+        self.solver.solve(self.b.x.petsc_vec, self.vn.x.petsc_vec)
         self.vn.x.scatter_forward()
 
 
