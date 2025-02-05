@@ -34,38 +34,39 @@ def solve(h, lagrange_order=2, save_solution=False):
         vtx.close()
     return problem.u
 
-def L2_diff_coarse_fine(h, u_fine, compute_in_coarse_space = True, lagrange_order = 2):
-    # ? Interpolate the coarser solution into finer mesh and compute error there?
-    # ? Should it be opposite?
+def L2_diff_coarse_fine(h, u_fine, lagrange_order = 2):
+    # Interpolate the coarser solution into finer mesh and compute error there?
+    # Opposite would lose details from the fine solution.
     u_coarse = solve(h, lagrange_order)
-    if compute_in_coarse_space:
-        u_fine_interp = fem.Function(u_coarse.function_space)
-        u_fine_interp.interpolate(u_fine,
-                    nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-                                        u_coarse.function_space.mesh, 
-                                        u_coarse.function_space.element, 
-                                        u_fine.function_space.mesh))
-        comm = u_coarse.function_space.mesh.comm
-        error = fem.form((u_fine_interp - u_coarse)**2 * ufl.dx) 
-    else:
-        u_coarse_interp = fem.Function(u_fine.function_space)
-        u_coarse_interp.interpolate(u_coarse,
-                    nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-                                        u_fine.function_space.mesh, 
-                                        u_fine.function_space.element, 
-                                        u_coarse.function_space.mesh))
-        comm = u_fine.function_space.mesh.comm
-        error = fem.form((u_fine - u_coarse_interp)**2 * ufl.dx) 
+
+    u_coarse_interp = fem.Function(u_fine.function_space)
+    # Outdated:
+    # u_coarse_interp.interpolate(u_coarse,
+    #             nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
+    #                                 u_fine.function_space.mesh, 
+    #                                 u_fine.function_space.element, 
+    #                                 u_coarse.function_space.mesh))
+    V_coarse, V_fine = u_coarse.function_space, u_fine.function_space
+    domain_coarse = V_coarse.mesh
+
+    cell_map0 = domain_coarse.topology.index_map(domain_coarse.topology.dim)
+    num_cells_on_proc = cell_map0.size_local + cell_map0.num_ghosts
+    cells0 = np.arange(num_cells_on_proc, dtype=np.int32)
+    interpolation_data1 = fem.create_interpolation_data(V_fine, V_coarse, cells0)
+    
+    u_coarse_interp.interpolate_nonmatching(u_coarse, cells0, interpolation_data1)
+
+    comm = u_fine.function_space.mesh.comm
+    error = fem.form((u_fine - u_coarse_interp)**2 * ufl.dx) 
     E = np.sqrt(comm.allreduce(fem.assemble_scalar(error), MPI.SUM))
     return E
 
-def convergence_plot(h_exact, hs, plot_title, compute_in_coarse_space=True, lagrange_order = 2):
-    u_fine = solve(h_exact)
+def convergence_plot(h_fine, hs, plot_title, lagrange_order = 2):
+    u_fine = solve(h_fine)
     errors = np.zeros_like(hs)
     for i in range(len(hs)):
         errors[i] = L2_diff_coarse_fine(hs[i], 
                                         u_fine, 
-                                        compute_in_coarse_space = compute_in_coarse_space,
                                         lagrange_order = lagrange_order)
 
     order = (np.log(errors[-1]) - np.log(errors[-2])) / (np.log(hs[-1]) - np.log(hs[-2]))
@@ -79,7 +80,6 @@ def convergence_plot(h_exact, hs, plot_title, compute_in_coarse_space=True, lagr
     fig.savefig(plot_title, bbox_inches='tight')
     fig.show()
 
-h_exact = 0.075
+h_fine = 0.075
 hs = [0.1, 0.15, 0.2, 0.3, 0.4]
-convergence_plot(h_exact, hs, "coarsespace.png", compute_in_coarse_space=True)
-convergence_plot(h_exact, hs, "finespace.png", compute_in_coarse_space=False)
+convergence_plot(h_fine, hs, "mech_convergence.png")
