@@ -8,7 +8,7 @@ import sys
 sys.path.append("../")
 
 from src.hyperelasticity import HyperelasticProblem
-from src.utils import interpolate
+from src.utils import interpolate_to_mesh
 
 
 def solve(h, lagrange_order=2, save_solution=False):
@@ -46,7 +46,7 @@ def L2_diff_coarse_fine(h, u_fine, lagrange_order=2):
     # Opposite would lose details from the fine solution.
     u_coarse = solve(h, lagrange_order)
 
-    u_coarse_interp = interpolate(u_from=u_coarse, V_to=u_fine.function_space)
+    u_coarse_interp = interpolate_to_mesh(u_from=u_coarse, V_to=u_fine.function_space)
 
     comm = u_fine.function_space.mesh.comm
     error = fem.form((u_fine - u_coarse_interp) ** 2 * ufl.dx)

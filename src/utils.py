@@ -5,7 +5,7 @@ import packaging
 dolfinx_version = packaging.version.parse(dolfinx.__version__)
 
 
-def interpolate(u_from, V_to):
+def interpolate_to_mesh(u_from, V_to):
     u_from_interp = dolfinx.fem.Function(V_to)
     if dolfinx_version < packaging.version.parse("0.9.0"):
         u_from_interp.interpolate(
