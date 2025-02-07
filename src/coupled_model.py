@@ -1,10 +1,9 @@
 import adios4dolfinx
-from dolfinx import fem, mesh, default_scalar_type, io, log
+from dolfinx import fem, io
 from mpi4py import MPI
 from dataclasses import dataclass
 import src.monodomain as monodomain
 import src.hyperelasticity as hyperelasticity
-import gotranx
 
 import sys
 from pathlib import Path
@@ -12,20 +11,6 @@ from pathlib import Path
 import adios4dolfinx
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-
-def translateODE(odeFileName, schemes):
-    odeFolder = str(Path.cwd().parent) + "/odes/"
-    model_path = Path(odeFolder + odeFileName + ".py")
-    if not model_path.is_file():
-        ode = gotranx.load_ode(odeFolder + odeFileName + ".ode")
-        code = gotranx.cli.gotran2py.get_code(ode, schemes)
-        model_path.write_text(code)
-    else:
-        print("ODE already translated")
-
-
-# translateODE('tentusscher_land_1way', [gotranx.schemes.Scheme.generalized_rush_larsen])
 
 
 @dataclass

@@ -1,21 +1,14 @@
 import numpy as np
 import ufl
-from dolfinx import mesh
-from mpi4py import MPI
 from pint import UnitRegistry
 
 ureg = UnitRegistry()
 import sys
 
 sys.path.append("../")
-from src.monodomain import PDESolver, ODESolver, MonodomainSolver
+from src.monodomain import MonodomainSolver
 from src.hyperelasticity import HyperelasticProblem
 from src.coupled_model import WeaklyCoupledModel
-
-h = 0.5
-dt = 0.05
-theta = 1
-lagrange_order = 2
 
 initial_states = {
     "V": -85.23,  # mV
@@ -38,6 +31,24 @@ initial_states = {
     "Na_i": 8.604,  # millimolar
     "K_i": 136.89,  # millimolar
 }
+h = 0.5
+dt = 0.05
+theta = 1
+lagrange_order = 2
+
+ep_solver = MonodomainSolver(h, dt, theta)
+
+Lx, Ly, Lz = 3, 7, 20  # mm
+L = (Lx, Ly, Lz)
+element = ("Lagrange", lagrange_order)
+ep_solver.set_rectangular_mesh(L, element)
+
+ep_solver.set_cell_model(
+    odefile="tentusscher_land_1way",
+    scheme="generalized_rush_larsen",
+    initial_states=initial_states,
+    v_name="V",
+)
 
 chi = 1400 * ureg("1/cm")
 C_m = 1 * ureg("uF/cm**2")
@@ -55,8 +66,7 @@ M = ufl.tensors.as_tensor(
     )
 )
 
-pde = PDESolver(h, dt, theta, M)
-mesh_comm = MPI.COMM_WORLD
+ep_solver.set_conductivity(M)
 
 stim_amplitude = 50000 * ureg("uA/cm**3")
 amplitude_magnitude = (stim_amplitude / (C_m * chi)).to("mV/ms").magnitude
@@ -67,43 +77,15 @@ def I_stim(x, t):
     return ufl.conditional(condition, amplitude_magnitude, 0)
 
 
-Lx, Ly, Lz = 3, 7, 20  # mm
-domain = mesh.create_box(
-    mesh_comm, [[0, 0, 0], [Lx, Ly, Lz]], n=[int(Lx / h), int(Ly / h), int(Lz / h)]
-)
-
-pde.set_mesh(domain, lagrange_order)
-pde.set_stimulus(I_stim)
-pde.setup_solver("CG")
-
-num_nodes = pde.V.dofmap.index_map.size_global
-
-ode = ODESolver(
-    odefile="tentusscher_land_1way",
-    scheme="generalized_rush_larsen",
-    num_nodes=num_nodes,
-    v_name="V",
-    initial_states=initial_states,
-)
-ode.set_param("stim_amplitude", 0)
-
-ep_solver = MonodomainSolver(pde, ode)
+ep_solver.set_stimulus(I_stim)
+ep_solver.setup_solver()
 
 mech_solver = HyperelasticProblem(h=h, lagrange_order=lagrange_order)
-mech_solver.set_existing_domain(domain, 2, 1)
+mech_solver.set_existing_domain(ep_solver.domain, 2, 1)
 
-
-def left(x):
-    return np.isclose(x[0], 0)
-
-
-def front(x):
-    return np.isclose(x[1], 0)
-
-
-def bottom(x):
-    return np.isclose(x[2], 0)
-
+left = lambda x: np.isclose(x[0], 0)
+front = lambda x: np.isclose(x[1], 0)
+bottom = lambda x: np.isclose(x[2], 0)
 
 boundaries = [left, front, bottom]
 vals = [0, 1, 2]
@@ -112,5 +94,5 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-# coupled_solver.solve(70, save_displacement=True)
-coupled_solver.solve_ep_save_Ta(30)
+coupled_solver.solve(70, save_displacement=True)
+# coupled_solver.solve_ep_save_Ta(30)

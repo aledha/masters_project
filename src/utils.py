@@ -1,9 +1,23 @@
 import dolfinx
 import numpy as np
 import packaging
+import gotranx
+from pathlib import Path
 
 dolfinx_version = packaging.version.parse(dolfinx.__version__)
 
+def translateODE(odeFileName, schemes):
+    odeFolder = str(Path.cwd().parent) + "/odes/"
+    model_path = Path(odeFolder + odeFileName + ".py")
+    if not model_path.is_file():
+        ode = gotranx.load_ode(odeFolder + odeFileName + ".ode")
+        code = gotranx.cli.gotran2py.get_code(ode, schemes)
+        model_path.write_text(code)
+    else:
+        print("ODE already translated")
+
+
+# translateODE('tentusscher_land_1way', [gotranx.schemes.Scheme.generalized_rush_larsen])
 
 def interpolate_to_mesh(u_from, V_to):
     u_from_interp = dolfinx.fem.Function(V_to)
