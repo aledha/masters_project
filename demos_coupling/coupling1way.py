@@ -93,6 +93,5 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-coupled_solver.solve(70, save_displacement=True)
-
-#coupled_solver.solve_ep_save_Ta(50)
+#coupled_solver.solve(70, save_displacement=True)
+coupled_solver.solve_ep_save_Ta(30)
