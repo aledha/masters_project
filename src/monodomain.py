@@ -25,9 +25,6 @@ class PDESolver:
         self.vn = fem.Function(self.V)
         self.vn.name = "vn"
 
-    def set_stimulus(self, I_stim):
-        self.I_stim = I_stim(self.x, self.t)  # = 1/(chi*C_m) * I_stim
-
     def setup_pde_solver(self, M, I_stim, dt, theta, solver_type="PREONLY"):
         v = ufl.TrialFunction(self.V)
         phi = ufl.TestFunction(self.V)
@@ -78,7 +75,8 @@ class ODESolver:
 
         self.v_index = self.model.state_index(v_name)
 
-        self.params = self.model.init_parameter_values()
+        init_params = self.model.init_parameter_values()
+        self.params = np.tile(init_params, (num_nodes, 1)).T
         self.odesolver = getattr(self.model, scheme)
 
     def set_param(self, name, value):
@@ -134,12 +132,9 @@ class MonodomainSolver:
         self.pde.setup_pde_solver(self.M, self.I_stim, self.dt, self.theta, solver_type)
 
     def _transfer_ode_to_pde(self):
-        ode_vn = self.ode.get_vn()
-        # todo: make compatible with parallell
-        self.pde.vn.x.array[:] = ode_vn
+        self.pde.vn.x.array[:] = self.ode.get_vn()
 
     def _transfer_pde_to_ode(self):
-        # todo: make compatible with parallell
         self.ode.update_vn(self.pde.vn)
 
     def step(self):

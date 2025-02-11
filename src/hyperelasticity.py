@@ -47,13 +47,14 @@ class HyperelasticProblem:
         self.Ta = fem.Function(self.T_space)
 
     def _init_invariants(self, f_dir, s_dir):
-        f0 = ufl.unit_vector(f_dir, 3)
-        s0 = ufl.unit_vector(s_dir, 3)
+        # todo: allow arbitrary f direction
+        self.f0 = ufl.unit_vector(f_dir, 3)
+        self.s0 = ufl.unit_vector(s_dir, 3)
 
         self.I1 = ufl.variable(ufl.tr(self.C))
-        self.I4f = ufl.variable(ufl.dot(f0, ufl.dot(self.C, f0)))
-        self.I4s = ufl.variable(ufl.dot(s0, ufl.dot(self.C, s0)))
-        self.I8fs = ufl.variable(ufl.dot(s0, ufl.dot(self.C, f0)))
+        self.I4f = ufl.variable(ufl.dot(self.f0, ufl.dot(self.C, self.f0)))
+        self.I4s = ufl.variable(ufl.dot(self.s0, ufl.dot(self.C, self.s0)))
+        self.I8fs = ufl.variable(ufl.dot(self.s0, ufl.dot(self.C, self.f0)))
 
     def set_rectangular_domain(self, Lx, Ly, Lz, f_dir, s_dir):
         mesh_comm = MPI.COMM_WORLD

@@ -34,13 +34,12 @@ initial_states = {
 h = 0.5
 dt = 0.05
 theta = 1
-lagrange_order = 2
 
 ep_solver = MonodomainSolver(h, dt, theta)
 
 Lx, Ly, Lz = 3, 7, 20  # mm
 L = (Lx, Ly, Lz)
-element = ("Lagrange", lagrange_order)
+element = ("Lagrange", 2)
 ep_solver.set_rectangular_mesh(L, element)
 
 ep_solver.set_cell_model(
@@ -80,7 +79,7 @@ def I_stim(x, t):
 ep_solver.set_stimulus(I_stim)
 ep_solver.setup_solver()
 
-mech_solver = HyperelasticProblem(h=h, lagrange_order=lagrange_order)
+mech_solver = HyperelasticProblem(h=h, lagrange_order=2)
 mech_solver.set_existing_domain(ep_solver.domain, 2, 1)
 
 left = lambda x: np.isclose(x[0], 0)
@@ -94,5 +93,6 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-coupled_solver.solve(70, save_displacement=True)
-# coupled_solver.solve_ep_save_Ta(30)
+#coupled_solver.solve(23, N=10, save_displacement=True)
+#coupled_solver.solve_ep_save_Ta(70, "Ta_DG1.bp")
+coupled_solver.solve_mech_with_saved_Ta("Ta_L2.bp", 50.00, ("DG", 1))
