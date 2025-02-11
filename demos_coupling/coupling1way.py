@@ -39,8 +39,8 @@ ep_solver = MonodomainSolver(h, dt, theta)
 
 Lx, Ly, Lz = 3, 7, 20  # mm
 L = (Lx, Ly, Lz)
-element = ("Lagrange", 2)
-ep_solver.set_rectangular_mesh(L, element)
+ode_element = ("Lagrange", 2)
+ep_solver.set_rectangular_mesh(L, ode_element)
 
 ep_solver.set_cell_model(
     odefile="tentusscher_land_1way",
@@ -93,6 +93,6 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-#coupled_solver.solve(23, N=10, save_displacement=True)
+coupled_solver.solve(23, N=10, save_displacement=False)
 #coupled_solver.solve_ep_save_Ta(70, "Ta_DG1.bp")
-coupled_solver.solve_mech_with_saved_Ta("Ta_L2.bp", 50.00, ("DG", 1))
+#coupled_solver.solve_mech_with_saved_Ta("Ta_L2.bp", 50.00, ("DG", 1))

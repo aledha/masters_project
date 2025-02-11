@@ -22,7 +22,7 @@ class WeaklyCoupledModel:
         self.dt = self.ep.dt
         self.domain = self.ep.domain
         self.Ta_index = self.ep.ode.model.monitor_index("Ta")
-        self.Ta_lagrange = fem.Function(self.ep.pde.V)
+        self.Ta_ode_space = fem.Function(self.ep.pde.V_ode)
         self.Ta = self.mech.Ta
 
         with io.XDMFFile(MPI.COMM_WORLD, "Ta.xdmf", "w") as xdmf:
@@ -32,13 +32,17 @@ class WeaklyCoupledModel:
         Ta_array = self.ep.ode.model.monitor_values(
             self.t.value, self.ep.ode.states, self.ep.ode.params
         )[self.Ta_index]
-        self.Ta_lagrange.x.array[:] = Ta_array
-        self.Ta.interpolate(self.Ta_lagrange)
+        self.Ta_ode.x.array[:] = Ta_array
+        self.Ta.interpolate(self.Ta_ode)
+        if Path(title).exists():
+            writemode = adios4dolfinx.adios2_helpers.adios2.Mode.Append
+        else:  
+            writemode = adios4dolfinx.adios2_helpers.adios2.Mode.Write
 
         adios4dolfinx.write_function_on_input_mesh(
             title,
             self.Ta,
-            mode=adios4dolfinx.adios2_helpers.adios2.Mode.Write,
+            mode=writemode,
             time=self.t.value,
             name="Ta",
         )
@@ -46,9 +50,9 @@ class WeaklyCoupledModel:
     def _transfer_lmbda(self, N=10):
         f = self.mech.F * self.mech.f0
         lmbda_exp = fem.Expression(
-            ufl.sqrt(f**2), self.ep.pde.V.element.interpolation_points()
+            ufl.sqrt(f**2), self.ep.pde.V_ode.element.interpolation_points()
         )
-        lmbda_func = fem.Function(self.ep.pde.V)
+        lmbda_func = fem.Function(self.ep.pde.V_ode)
         lmbda_func.interpolate(lmbda_exp)
         lmbda = lmbda_func.x.petsc_vec[:]
         self.ep.ode.set_param("lmbda", lmbda)
@@ -62,16 +66,14 @@ class WeaklyCoupledModel:
         self.prev_lmbda = lmbda
 
     def _transfer_Ta(self, Ta = None):
-        # Now I am saving T_a to a function defined on the EP ode space,
-        # and then interpolating it into the T_a space (DG, 0).
         if Ta:
             Ta_array = Ta.x.petsc_vec
         else:
             Ta_array = self.ep.ode.model.monitor_values(
                 self.t.value, self.ep.ode.states, self.ep.ode.params
             )[self.Ta_index]
-        self.Ta_lagrange.x.array[:] = Ta_array
-        self.mech.set_tension(self.Ta_lagrange)
+        self.Ta_ode_space.x.array[:] = Ta_array
+        self.mech.set_tension(self.Ta_ode_space)
 
 
     def solve(self, T, N=10, save_displacement=False):
@@ -79,7 +81,7 @@ class WeaklyCoupledModel:
             vtx = io.VTXWriter(
                 MPI.COMM_WORLD,
                 "coupling1way.bp",
-                [self.mech.u, self.ep.pde.vn],
+                [self.mech.u, self.ep.pde.v_ode],
                 engine="BP4",
             )
         n = 0
@@ -89,7 +91,6 @@ class WeaklyCoupledModel:
             if n % N == 0:
                 self._transfer_Ta()
                 self.mech.solve()
-                self._transfer_lmbda()
             if self.domain.comm.rank == 0:
                 print(f"Solved for t={self.t.value}")
             if save_displacement:
@@ -101,14 +102,15 @@ class WeaklyCoupledModel:
         while self.t.value < T + self.dt:
             self.ep.step()
             self._save_Ta(title)
-            print("Solved for t = ", self.t.value)
+            if self.domain.comm.rank == 0:
+                print("Solved for t = ", self.t.value)
 
     def solve_mech_with_saved_Ta(self, function_filename, time, element):
         with io.XDMFFile(MPI.COMM_WORLD, "Ta.xdmf", "r") as xdmf:
             in_mesh = xdmf.read_mesh()
         V = fem.functionspace(in_mesh, element)
         Ta_in = fem.Function(V)
-        adios4dolfinx.read_function(function_filename, Ta_in, time=time, name="Output")
+        adios4dolfinx.read_function(function_filename, Ta_in, time=time, name="Ta")
         self._transfer_Ta(Ta_in)
         self.mech.solve()
 

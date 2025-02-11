@@ -15,31 +15,34 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 
 class PDESolver:
-    def __init__(self, domain, element):
+    def __init__(self, domain, ode_element):
         self.domain = domain
+        self.V_ode = fem.functionspace(domain, ode_element)
+        pde_element = ("Lagrange", 1)
+        self.V_pde = fem.functionspace(domain, pde_element)
 
-        self.V = fem.functionspace(domain, element)
         self.t = fem.Constant(domain, 0.0)
         self.x = ufl.SpatialCoordinate(domain)
 
-        self.vn = fem.Function(self.V)
-        self.vn.name = "vn"
+        self.v_ode = fem.Function(self.V_ode)
+        self.v_pde = fem.Function(self.V_pde)
+        self.v_pde.name = "membrane potential"
 
     def setup_pde_solver(self, M, I_stim, dt, theta, solver_type="PREONLY"):
-        v = ufl.TrialFunction(self.V)
-        phi = ufl.TestFunction(self.V)
+        v = ufl.TrialFunction(self.V_pde)
+        phi = ufl.TestFunction(self.V_pde)
         dx = ufl.dx(domain=self.domain)
         a = phi * v * dx + dt * theta * ufl.dot(ufl.grad(phi), M * ufl.grad(v)) * dx
         L = (
-            phi * (self.vn + dt * I_stim) * dx
-            - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.vn)) * dx
+            phi * (self.v_pde + dt * I_stim) * dx
+            - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.v_pde)) * dx
         )
         compiled_a = fem.form(a)
         A = petsc.assemble_matrix(compiled_a)
         A.assemble()
-
         self.compiled_L = fem.form(L)
-        self.b = fem.Function(self.V)
+        self.b = fem.Function(self.V_pde)
+
         self.solver = PETSc.KSP().create(self.domain.comm)
         if solver_type == "PREONLY":
             self.solver.setType(PETSc.KSP.Type.PREONLY)
@@ -53,10 +56,12 @@ class PDESolver:
         self.solver.setOperators(A)
 
     def solve_pde_step(self):
+        
         self.b.x.array[:] = 0
         petsc.assemble_vector(self.b.x.petsc_vec, self.compiled_L)
-        self.solver.solve(self.b.x.petsc_vec, self.vn.x.petsc_vec)
-        self.vn.x.scatter_forward()
+        self.solver.solve(self.b.x.petsc_vec, self.v_pde.x.petsc_vec)
+        self.v_ode.interpolate(self.v_pde)
+        self.v_ode.x.scatter_forward()
 
 
 class ODESolver:
@@ -72,7 +77,6 @@ class ODESolver:
             init = self.model.init_state_values()
 
         self.states = np.tile(init, (num_nodes, 1)).T
-
         self.v_index = self.model.state_index(v_name)
 
         init_params = self.model.init_parameter_values()
@@ -90,10 +94,10 @@ class ODESolver:
     def solve_ode_step(self, t, dt):
         self.states[:] = self.odesolver(self.states, t, dt, self.params)
 
-    def update_vn(self, vn):
-        self.states[self.v_index, :] = vn.x.array[:]
+    def update_v(self, v_ode):
+        self.states[self.v_index, :] = v_ode.x.array[:]
 
-    def get_vn(self):
+    def get_v(self):
         return self.states[self.v_index, :]
 
 
@@ -103,7 +107,7 @@ class MonodomainSolver:
     dt: float
     theta: float
 
-    def set_rectangular_mesh(self, L, element):
+    def set_rectangular_mesh(self, L, ode_element):
         self.mesh_comm = MPI.COMM_WORLD
         Lx, Ly, Lz = L
         self.domain = mesh.create_box(
@@ -111,12 +115,14 @@ class MonodomainSolver:
             [[0, 0, 0], [Lx, Ly, Lz]],
             n=[int(Lx / self.h), int(Ly / self.h), int(Lz / self.h)],
         )
-        self.pde = PDESolver(self.domain, element)
+        self.pde = PDESolver(self.domain, ode_element)
         self.x = self.pde.x
         self.t = self.pde.t
 
     def set_cell_model(self, odefile, scheme, initial_states=None, v_name="v"):
-        num_nodes = self.pde.V.dofmap.index_map.size_global
+        # Does not work, leads mismatching array sizes
+        # num_nodes = self.pde.V_ode.dofmap.index_map.size_local
+        num_nodes = self.pde.v_ode.x.array.shape[0]
         self.ode = ODESolver(
             odefile, scheme, num_nodes, initial_states=initial_states, v_name=v_name
         )
@@ -132,10 +138,10 @@ class MonodomainSolver:
         self.pde.setup_pde_solver(self.M, self.I_stim, self.dt, self.theta, solver_type)
 
     def _transfer_ode_to_pde(self):
-        self.pde.vn.x.array[:] = self.ode.get_vn()
+        self.pde.v_ode.x.array[:] = self.ode.get_v()
 
     def _transfer_pde_to_ode(self):
-        self.ode.update_vn(self.pde.vn)
+        self.ode.update_v(self.pde.v_ode)
 
     def step(self):
         # Step 1
@@ -156,11 +162,11 @@ class MonodomainSolver:
     def solve(self, T, vtx_title=None):
         if vtx_title:
             vtx = io.VTXWriter(
-                MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.vn], engine="BP4"
+                MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.v_pde], engine="BP4"
             )
         while self.t.value < T + self.dt:
             self.step()
             if vtx_title:
                 vtx.write(self.t.value)
 
-        return self.pde.vn, self.pde.x, self.t
+        return self.pde.v_pde, self.pde.x, self.t
