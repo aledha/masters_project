@@ -46,17 +46,29 @@ class HyperelasticProblem:
         self.T_space = fem.functionspace(self.domain, ("DG", 0))
         self.Ta = fem.Function(self.T_space)
 
-    def _init_invariants(self, f_dir, s_dir):
-        # todo: allow arbitrary f direction
-        self.f0 = ufl.unit_vector(f_dir, 3)
-        self.s0 = ufl.unit_vector(s_dir, 3)
+    def _init_invariants(self, f0: ufl.tensors.ListTensor, s0: ufl.tensors.ListTensor):
+        self.f0 = f0
+        self.s0 = s0
 
         self.I1 = ufl.variable(ufl.tr(self.C))
         self.I4f = ufl.variable(ufl.dot(self.f0, ufl.dot(self.C, self.f0)))
         self.I4s = ufl.variable(ufl.dot(self.s0, ufl.dot(self.C, self.s0)))
         self.I8fs = ufl.variable(ufl.dot(self.s0, ufl.dot(self.C, self.f0)))
 
-    def set_rectangular_domain(self, Lx: float, Ly: float, Lz: float, f_dir, s_dir):
+    def set_rectangular_domain(
+        self,
+        L: tuple[float, float, float],
+        f0: ufl.tensors.ListTensor,
+        s0: ufl.tensors.ListTensor,
+    ):
+        """Set rectangular domain.
+
+        Args:
+            L (tuple[float, float, float]): size of domain. L = (Lx, Ly, Lz)
+            f0 (ufl.tensors.ListTensor): fiber direction
+            s0 (ufl.tensors.ListTensor): transversal direction
+        """
+        Lx, Ly, Lz = L
         mesh_comm = MPI.COMM_WORLD
         self.domain = mesh.create_box(
             mesh_comm,
@@ -64,12 +76,21 @@ class HyperelasticProblem:
             n=[int(Lx / self.h), int(Ly / self.h), int(Lz / self.h)],
         )
         self._init_functions()
-        self._init_invariants(f_dir, s_dir)
+        self._init_invariants(f0, s0)
 
-    def set_existing_domain(self, domain, f_dir, s_dir):
+    def set_existing_domain(
+        self, domain: mesh.Mesh, f0: ufl.tensors.ListTensor, s0: ufl.tensors.ListTensor
+    ):
+        """Set existing domain
+
+        Args:
+            domain (mesh.Mesh): domain to use
+            f0 (ufl.tensors.ListTensor): fiber direction
+            s0 (ufl.tensors.ListTensor): transversal direction
+        """
         self.domain = domain
         self._init_functions()
-        self._init_invariants(f_dir, s_dir)
+        self._init_invariants(f0, s0)
 
     def _dirichlet1(self, val: float, tag: int, facet_tag: mesh.MeshTags):
         u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
@@ -199,6 +220,11 @@ class HyperelasticProblem:
         self.solver.set_post_solve_callback(post_solve)
 
     def set_tension(self, tension: float | fem.Function):
+        """Set active tension from cell model
+
+        Args:
+            tension (float | fem.Function): Tension to set to.
+        """
         if isinstance(tension, float):
             # ? better way to set function equal to constant?
             self.Ta.interpolate(lambda x: tension + 0 * x[0])

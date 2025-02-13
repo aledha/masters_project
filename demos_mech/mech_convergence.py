@@ -13,7 +13,10 @@ from src.utils import interpolate_to_mesh
 
 def solve(h, lagrange_order=2, save_solution=False):
     problem = HyperelasticProblem(h, lagrange_order)
-    problem.set_rectangular_domain(1, 1, 1, 0, 1)
+    L = (1, 1, 1)
+    f0 = ufl.unit_vector(0, 3)
+    s0 = ufl.unit_vector(1, 3)
+    problem.set_rectangular_domain(L, f0, s0)
 
     def left(x):
         return np.isclose(x[0], 0)

@@ -1,5 +1,6 @@
 import numpy as np
 from dolfinx import io
+import ufl
 from mpi4py import MPI
 import sys
 
@@ -8,25 +9,16 @@ sys.path.append("../")
 from src.hyperelasticity import HyperelasticProblem
 
 problem = HyperelasticProblem(h=0.2, lagrange_order=2)
-problem.set_rectangular_domain(1, 1, 1, 0, 1)
+L = (1, 1, 1)
+f0 = ufl.unit_vector(0, 3)
+s0 = ufl.unit_vector(1, 3)
+problem.set_rectangular_domain(L, f0, s0)
 
 
-def left(x):
-    return np.isclose(x[0], 0)
-
-
-def front(x):
-    return np.isclose(x[1], 0)
-
-
-def bottom(x):
-    return np.isclose(x[2], 0)
-
-
-def right(x):
-    return np.isclose(x[0], 1)
-
-
+left = lambda x: np.isclose(x[0], 0)
+front = lambda x: np.isclose(x[1], 0)
+bottom = lambda x: np.isclose(x[2], 0)
+right = lambda x: np.isclose(x[0], 1)
 boundaries = [left, front, bottom, right]
 vals = [0, 1, 2, -1.0]
 bc_types = ["d2", "d2", "d2", "n"]
