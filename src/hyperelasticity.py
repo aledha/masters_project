@@ -5,7 +5,7 @@ import ufl
 from scifem import NewtonSolver
 from dataclasses import dataclass
 import ufl.geometry
-import importlib
+from src.utils import pprint
 
 
 @dataclass
@@ -56,7 +56,7 @@ class HyperelasticProblem:
         self.I4s = ufl.variable(ufl.dot(self.s0, ufl.dot(self.C, self.s0)))
         self.I8fs = ufl.variable(ufl.dot(self.s0, ufl.dot(self.C, self.f0)))
 
-    def set_rectangular_domain(self, Lx, Ly, Lz, f_dir, s_dir):
+    def set_rectangular_domain(self, Lx: float, Ly: float, Lz: float, f_dir, s_dir):
         mesh_comm = MPI.COMM_WORLD
         self.domain = mesh.create_box(
             mesh_comm,
@@ -71,18 +71,18 @@ class HyperelasticProblem:
         self._init_functions()
         self._init_invariants(f_dir, s_dir)
 
-    def _dirichlet1(self, val, tag, facet_tag):
+    def _dirichlet1(self, val: float, tag: int, facet_tag: mesh.MeshTags):
         u_bc = np.array((val,) * self.domain.geometry.dim, dtype=default_scalar_type)
         dofs = fem.locate_dofs_topological(self.V, facet_tag.dim, facet_tag.find(tag))
         self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
 
-    def _dirichlet2(self, val, tag, facet_tag):
+    def _dirichlet2(self, val: float, tag: int, facet_tag: mesh.MeshTags):
         dofs = fem.locate_dofs_topological(
             self.V.sub(val), facet_tag.dim, facet_tag.find(tag)
         )
         self.bcs.append(fem.dirichletbc(default_scalar_type(0), dofs, self.V.sub(val)))
 
-    def _neumann(self, val, tag, facet_tag):
+    def _neumann(self, val: float, tag: int, facet_tag: mesh.MeshTags):
         ds = ufl.Measure(
             "ds",
             domain=self.domain,
@@ -93,11 +93,17 @@ class HyperelasticProblem:
         t = fem.Constant(self.domain, default_scalar_type(val))
         self.R_neumann += ufl.inner(t * N, self.v) * ds(tag)
 
-    def boundary_conditions(self, boundaries, vals, bc_types, tags=None):
+    def boundary_conditions(
+        self,
+        boundaries,
+        vals: list[float],
+        bc_types: list[str],
+        tags: list[int] | None = None,
+    ):
         """Apply Dirichlet (type 1 or 2) and/or Neumann boundary conditions
 
         Args:
-            boundaries (list of callables): functions that returns boolean of coordinate is near boundary
+            boundaries (list of callables): functions that returns boolean if coordinate is near boundary
             vals (list of floats):
                 if Dirichlet type 1: value to hold u at
                 if Dirichlet type 2: dimension to restrict u
@@ -188,12 +194,11 @@ class HyperelasticProblem:
 
         def post_solve(solver: NewtonSolver):
             norm = solver.dx.norm(0)
-            if self.domain.comm.rank == 0:
-                print(f"Solve completed in with correction norm {norm}")
+            pprint(f"Solve completed in with correction norm {norm}", self.domain)
 
         self.solver.set_post_solve_callback(post_solve)
 
-    def set_tension(self, tension):
+    def set_tension(self, tension: float | fem.Function):
         if isinstance(tension, float):
             # ? better way to set function equal to constant?
             self.Ta.interpolate(lambda x: tension + 0 * x[0])

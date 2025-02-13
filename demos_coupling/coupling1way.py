@@ -1,5 +1,6 @@
 import numpy as np
 import ufl
+from pathlib import Path
 from pint import UnitRegistry
 
 ureg = UnitRegistry()
@@ -93,6 +94,6 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-coupled_solver.solve(23, N=10, save_displacement=False)
-#coupled_solver.solve_ep_save_Ta(70, "Ta_DG1.bp")
+#coupled_solver.solve(23, N=10, save_displacement=False)
+coupled_solver.solve_ep_save_Ta(70, Path("Ta_L2"), Path("L2"))
 #coupled_solver.solve_mech_with_saved_Ta("Ta_L2.bp", 50.00, ("DG", 1))
