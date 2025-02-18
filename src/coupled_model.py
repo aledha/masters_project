@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+func_dir = Path(__file__).parents[1] / "saved_funcs"
 
 
 @dataclass
@@ -56,12 +57,12 @@ class WeaklyCoupledModel:
             Ta_array = self.ep.ode.model.monitor_values(
                 self.t.value, self.ep.ode.states, self.ep.ode.params
             )[self.Ta_index]
-        self.Ta_ode_space.x.array[:] = Ta_array
-        self.mech.set_tension(self.Ta_ode_space)
+        self.Ta_ode.x.array[:] = Ta_array
+        self.mech.set_tension(self.Ta_ode)
 
     def solve(self, T: float, N: int = 10, save_displacement: bool = False):
-        """Solve weakly coupled model until end time T. 
-        Solves EP at each step, and solves mechanics at each Nth step. 
+        """Solve weakly coupled model until end time T.
+        Solves EP at each step, and solves mechanics at each Nth step.
         Mech is more expensive to solve than EP.
 
         Args:
@@ -72,7 +73,7 @@ class WeaklyCoupledModel:
         if save_displacement:
             vtx = io.VTXWriter(
                 MPI.COMM_WORLD,
-                "coupling1way.bp",
+                func_dir / "coupling1way.bp",
                 [self.mech.u, self.ep.pde.v_ode],
                 engine="BP4",
             )
@@ -89,40 +90,39 @@ class WeaklyCoupledModel:
         if save_displacement:
             vtx.close()
 
-    def _save_Ta(self, function_filename: Path):
+    def _save_Ta(self, function_filename: str):
         """Save tension to file using adios4dolfinx.
 
         Args:
-            function_filename (Path): file to save tension to
+            function_filename (str): file to save tension to
         """
         Ta_array = self.ep.ode.model.monitor_values(
             self.t.value, self.ep.ode.states, self.ep.ode.params
         )[self.Ta_index]
         self.Ta_ode.x.array[:] = Ta_array
-        self.Ta.interpolate(self.Ta_ode)
-        if function_filename.exists():
+        if (func_dir / function_filename).with_suffix(".bp").exists():
             writemode = adios4dolfinx.adios2_helpers.adios2.Mode.Append
         else:
             writemode = adios4dolfinx.adios2_helpers.adios2.Mode.Write
 
         adios4dolfinx.write_function_on_input_mesh(
-            function_filename.with_suffix(".bp"),
-            self.Ta,
+            (func_dir / function_filename).with_suffix(".bp"),
+            self.Ta_ode,
             mode=writemode,
             time=np.round(self.t.value, 2),
             name="Ta",
         )
 
-    def solve_ep_save_Ta(self, T: float, function_filename: Path, mesh_filename: Path):
+    def solve_ep_save_Ta(self, T: float, function_filename: str, mesh_filename: str):
         """Solve EP and save tension to file.
 
         Args:
             T (float): end time
-            function_filename (Path): file to save tension to
-            mesh_filename (Path): file to save mesh to
+            function_filename (str): file to save tension to.
+            mesh_filename (str): file to save mesh to.
         """
         with io.XDMFFile(
-            MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "w"
+            MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "w"
         ) as xdmf:
             xdmf.write_mesh(self.ep.domain)
         while self.t.value < T:
@@ -132,17 +132,43 @@ class WeaklyCoupledModel:
 
     def solve_mech_with_saved_Ta(
         self,
-        function_filename: Path,
-        mesh_filename: Path,
-        time: float,
+        function_filename: str,
+        mesh_filename: str,
+        time: float | np.ndarray,
         element: tuple[str, int],
+        saveto_file: str,
     ):
+        vtx = io.VTXWriter(
+                MPI.COMM_WORLD,
+                (func_dir / saveto_file).with_suffix(".bp"),
+                [self.mech.u],
+                engine="BP4",
+            )
         with io.XDMFFile(
-            MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "r"
+            MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "r"
         ) as xdmf:
             in_mesh = xdmf.read_mesh()
         V = fem.functionspace(in_mesh, element)
         Ta_in = fem.Function(V)
-        adios4dolfinx.read_function(function_filename, Ta_in, time=time, name="Ta")
-        self._transfer_Ta(Ta_in)
-        self.mech.solve()
+        if isinstance(time, float) or isinstance(time, int):
+            adios4dolfinx.read_function(
+                (func_dir / function_filename).with_suffix(".bp"),
+                Ta_in,
+                time=time,
+                name="Ta",
+            )
+            self._transfer_Ta(Ta_in)
+            self.mech.solve()
+        else:
+            for t in time:
+                adios4dolfinx.read_function(
+                    (func_dir / function_filename).with_suffix(".bp"),
+                    Ta_in,
+                    time=t,
+                    name="Ta",
+                )
+                self._transfer_Ta(Ta_in)
+                self.mech.solve()
+                vtx.write(t)
+                pprint(f"Solved for t={t}", self.domain)
+            vtx.close()

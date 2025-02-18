@@ -2,6 +2,7 @@ import numpy as np
 from dolfinx import io
 import ufl
 from mpi4py import MPI
+from pathlib import Path
 import sys
 
 sys.path.append("../")
@@ -20,7 +21,8 @@ right = lambda x: np.isclose(x[0], 1)
 problem.boundary_conditions([left, right], vals=[0.0, -1.0], bc_types=["d1", "n"])
 problem.setup_solver()
 
-vtx = io.VTXWriter(MPI.COMM_WORLD, "unit_cube_dir1.bp", [problem.u], engine="BP4")
+func_dir = Path(__file__).parents[1] / "saved_funcs"
+vtx = io.VTXWriter(MPI.COMM_WORLD, func_dir / "unit_cube_dir1.bp", [problem.u], engine="BP4")
 
 T_as = np.linspace(0, 100, 11)
 for T_a in T_as:

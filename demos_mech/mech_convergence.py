@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 from dolfinx import io, fem
 from mpi4py import MPI
 import ufl
+from pathlib import Path
 import sys
 
 sys.path.append("../")
 
 from src.hyperelasticity import HyperelasticProblem
 from src.utils import interpolate_to_mesh
-
 
 def solve(h, lagrange_order=2, save_solution=False):
     problem = HyperelasticProblem(h, lagrange_order)
@@ -34,7 +34,8 @@ def solve(h, lagrange_order=2, save_solution=False):
 
     if save_solution:
         # Save reference configuration
-        vtx = io.VTXWriter(MPI.COMM_WORLD, "convergence.bp", [problem.u], engine="BP4")
+        func_dir = Path(__file__).parents[1] / "saved_funcs"
+        vtx = io.VTXWriter(MPI.COMM_WORLD, func_dir / "convergence.bp", [problem.u], engine="BP4")
         vtx.write(0.0)
     problem.solve()
     if save_solution:
@@ -73,10 +74,12 @@ def convergence_plot(h_fine, hs, plot_title, lagrange_order=2):
     ax.set_ylabel("Error")
     ax.set_title(f"Convergence plot of hyperelastic problem")
     ax.legend()
-    fig.savefig(plot_title, bbox_inches="tight")
+    figure_dir = Path(__file__).parents[1] / "saved_figures"
+    fig.savefig(figure_dir / plot_title, bbox_inches="tight")
     fig.show()
 
 
+#solve(h=0.1, save_solution=True)
 h_fine = 0.075
 hs = [0.1, 0.15, 0.2, 0.3, 0.4]
 convergence_plot(h_fine, hs, "mech_convergence.png")

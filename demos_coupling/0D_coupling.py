@@ -1,5 +1,5 @@
 # From https://computationalphysiology.github.io/zero-mech/examples/electro-mechanics/electro_mechanics.html
-import ufl
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import root
@@ -8,6 +8,7 @@ import sys
 sys.path.append("../")
 from src.monodomain import ODESolver
 
+figure_dir = Path(__file__).parents[1] / "saved_figures"
 
 def subplus(x):
     if x > 0:
@@ -157,8 +158,7 @@ class zeroD_coupling:
         for axi in ax.flatten():
             axi.grid()
         fig.tight_layout()
-        fig.savefig(filename)
-
+        fig.savefig(figure_dir / filename)
 
 weakcoupling = zeroD_coupling(dt=0.1, T=400)
 weakcoupling.solve_weak()

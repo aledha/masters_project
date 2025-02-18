@@ -1,6 +1,7 @@
 import numpy as np
 from dolfinx import io
 import ufl
+from pathlib import Path
 from mpi4py import MPI
 import sys
 
@@ -26,7 +27,8 @@ bc_types = ["d2", "d2", "d2", "n"]
 problem.boundary_conditions(boundaries, vals, bc_types)
 problem.setup_solver()
 
-vtx = io.VTXWriter(MPI.COMM_WORLD, "unit_cube_dir2.bp", [problem.u], engine="BP4")
+func_dir = Path(__file__).parents[1] / "saved_funcs"
+vtx = io.VTXWriter(MPI.COMM_WORLD, func_dir / "unit_cube_dir2.bp", [problem.u], engine="BP4")
 
 T_as = np.linspace(0, 100, 11)
 for T_a in T_as:

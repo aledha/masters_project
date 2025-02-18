@@ -40,8 +40,7 @@ ep_solver = MonodomainSolver(h, dt, theta)
 
 Lx, Ly, Lz = 3, 7, 20  # mm
 L = (Lx, Ly, Lz)
-print(type(L))
-ode_element = ("Lagrange", 2)
+ode_element = ("DG", 1)
 ep_solver.set_rectangular_mesh(L, ode_element)
 
 ep_solver.set_cell_model(
@@ -66,8 +65,6 @@ M = ufl.tensors.as_tensor(
         [trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled]
     )
 )
-f=ufl.unit_vector(1, 3)
-print(type(f))
 
 ep_solver.set_conductivity(M)
 
@@ -79,11 +76,14 @@ def I_stim(x, t):
     condition = ufl.And(ufl.And(x[0] <= 1.5, x[1] <= 1.5), ufl.And(x[2] <= 1.5, t <= 2))
     return ufl.conditional(condition, amplitude_magnitude, 0)
 
+
 ep_solver.set_stimulus(I_stim)
 ep_solver.setup_solver()
 
 mech_solver = HyperelasticProblem(h=h, lagrange_order=2)
-mech_solver.set_existing_domain(ep_solver.domain, 2, 1)
+f0 = ufl.unit_vector(2, 3)
+s0 = ufl.unit_vector(1, 3)
+mech_solver.set_existing_domain(ep_solver.domain, f0, s0)
 
 left = lambda x: np.isclose(x[0], 0)
 front = lambda x: np.isclose(x[1], 0)
@@ -96,6 +96,14 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-#coupled_solver.solve(23, N=10, save_displacement=False)
-#coupled_solver.solve_ep_save_Ta(70, Path("Ta_L2"), Path("L2"))
-#coupled_solver.solve_mech_with_saved_Ta("Ta_L2.bp", 50.00, ("DG", 1))
+# coupled_solver.solve(23, N=10, save_displacement=False)
+# coupled_solver.solve_ep_save_Ta(70, "saved_Ta_L2", "L2_mesh")
+# coupled_solver.solve_ep_save_Ta(70, "saved_Ta_DG1", "DG1_mesh")
+time = np.arange(1, 70, 0.5)
+coupled_solver.solve_mech_with_saved_Ta(
+    function_filename="saved_Ta_DG1.bp",
+    mesh_filename="DG1_mesh",
+    time=time,
+    element=("DG", 1),
+    saveto_file="u_with_saved_TaDG1"
+)
