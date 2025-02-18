@@ -92,17 +92,17 @@ class ODESolver:
         odefile: str,
         scheme: str,
         num_nodes: int,
-        initial_states: dict | None,
-        v_name: str,
+        v_name: str = "v",
+        initial_states: dict | None = None,
     ):
         """Intialize ODESolver instance
 
         Args:
-            odefile (str): name of .ode file found in odes/
+            odefile (str): name of .ode file in odes/
             scheme (str): scheme to use for solving ODEs. Either "forward_explicit_euler" or "generalized_rush_larsen".
             num_nodes (int): number of nodes (locally or globally)
-            initial_states (dict or None): dictionary of initial states. If none, uses default from .ode file.
-            v_name (str): name of transmembrane potential in .odefile.
+            initial_states (dict or None): dictionary of initial states. If None (Default), uses default from .ode file.
+            v_name (str): name of transmembrane potential in .odefile. Defaults to "v".
 
         Raises:
             ImportError: if odefile cannot be found.
