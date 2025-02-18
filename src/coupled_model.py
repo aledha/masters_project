@@ -1,5 +1,5 @@
 import adios4dolfinx
-from dolfinx import fem, io
+from dolfinx import fem, io, log
 from mpi4py import MPI
 import ufl
 import numpy as np
@@ -74,7 +74,7 @@ class WeaklyCoupledModel:
             vtx = io.VTXWriter(
                 MPI.COMM_WORLD,
                 func_dir / "coupling1way.bp",
-                [self.mech.u, self.ep.pde.v_ode],
+                [self.mech.u],
                 engine="BP4",
             )
         n = 0
@@ -84,7 +84,9 @@ class WeaklyCoupledModel:
             pprint(f"Solved EP for t={np.round(self.t.value, 2)}", self.domain)
             if n % N == 0:
                 self._transfer_Ta()
+                log.set_log_level(log.LogLevel.INFO)
                 self.mech.solve()
+                log.set_log_level(log.LogLevel.DEBUG)
             if save_displacement:
                 vtx.write(self.t.value)
         if save_displacement:
@@ -158,7 +160,10 @@ class WeaklyCoupledModel:
                 name="Ta",
             )
             self._transfer_Ta(Ta_in)
+            log.set_log_level(log.LogLevel.INFO)
             self.mech.solve()
+            log.set_log_level(log.LogLevel.DEBUG)
+
         else:
             for t in time:
                 adios4dolfinx.read_function(
@@ -168,7 +173,9 @@ class WeaklyCoupledModel:
                     name="Ta",
                 )
                 self._transfer_Ta(Ta_in)
+                log.set_log_level(log.LogLevel.DEBUG)
                 self.mech.solve()
+                log.set_log_level(log.LogLevel.ERROR)
                 vtx.write(t)
                 pprint(f"Solved for t={t}", self.domain)
             vtx.close()

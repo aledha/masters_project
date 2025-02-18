@@ -1,6 +1,8 @@
 import numpy as np
 import ufl
 from pathlib import Path
+import basix
+from dolfinx import mesh
 from pint import UnitRegistry
 
 ureg = UnitRegistry()
@@ -41,6 +43,9 @@ ep_solver = MonodomainSolver(h, dt, theta)
 Lx, Ly, Lz = 3, 7, 20  # mm
 L = (Lx, Ly, Lz)
 ode_element = ("DG", 1)
+
+# element = basix.ufl.quadrature_element(scheme="default", degree=4, cell=ufl_cell().cellname())
+
 ep_solver.set_rectangular_mesh(L, ode_element)
 
 ep_solver.set_cell_model(
@@ -80,10 +85,11 @@ def I_stim(x, t):
 ep_solver.set_stimulus(I_stim)
 ep_solver.setup_solver()
 
-mech_solver = HyperelasticProblem(h=h, lagrange_order=2)
+mech_solver = HyperelasticProblem(h=0.5, lagrange_order=2)
 f0 = ufl.unit_vector(2, 3)
 s0 = ufl.unit_vector(1, 3)
 mech_solver.set_existing_domain(ep_solver.domain, f0, s0)
+# mech_solver.set_rectangular_domain(L, f0, s0)
 
 left = lambda x: np.isclose(x[0], 0)
 front = lambda x: np.isclose(x[1], 0)
@@ -96,14 +102,14 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-# coupled_solver.solve(23, N=10, save_displacement=False)
+#coupled_solver.solve(70, N=10, save_displacement=True)
 # coupled_solver.solve_ep_save_Ta(70, "saved_Ta_L2", "L2_mesh")
 # coupled_solver.solve_ep_save_Ta(70, "saved_Ta_DG1", "DG1_mesh")
-time = np.arange(1, 70, 0.5)
+time = np.arange(1, 70, 1)
 coupled_solver.solve_mech_with_saved_Ta(
-    function_filename="saved_Ta_DG1.bp",
+    function_filename="saved_Ta_DG1",
     mesh_filename="DG1_mesh",
     time=time,
     element=("DG", 1),
-    saveto_file="u_with_saved_TaDG1"
+    saveto_file="u_with_saved_TaDG1",
 )
