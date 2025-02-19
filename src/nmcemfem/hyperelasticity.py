@@ -5,7 +5,7 @@ import ufl
 from scifem import NewtonSolver
 from dataclasses import dataclass
 import ufl.geometry
-from src.utils import pprint
+from nmcemfem.utils import pprint
 
 
 @dataclass
@@ -98,9 +98,7 @@ class HyperelasticProblem:
         self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
 
     def _dirichlet2(self, val: float, tag: int, facet_tag: mesh.MeshTags):
-        dofs = fem.locate_dofs_topological(
-            self.V.sub(val), facet_tag.dim, facet_tag.find(tag)
-        )
+        dofs = fem.locate_dofs_topological(self.V.sub(val), facet_tag.dim, facet_tag.find(tag))
         self.bcs.append(fem.dirichletbc(default_scalar_type(0), dofs, self.V.sub(val)))
 
     def _neumann(self, val: float, tag: int, facet_tag: mesh.MeshTags):

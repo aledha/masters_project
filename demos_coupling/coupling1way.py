@@ -6,12 +6,10 @@ from dolfinx import mesh
 from pint import UnitRegistry
 
 ureg = UnitRegistry()
-import sys
 
-sys.path.append("../")
-from src.monodomain import MonodomainSolver
-from src.hyperelasticity import HyperelasticProblem
-from src.coupled_model import WeaklyCoupledModel
+from nmcemfem.monodomain import MonodomainSolver
+from nmcemfem.hyperelasticity import HyperelasticProblem
+from nmcemfem.coupled_model import WeaklyCoupledModel
 
 initial_states = {
     "V": -85.23,  # mV
@@ -102,7 +100,7 @@ mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-#coupled_solver.solve(70, N=10, save_displacement=True)
+# coupled_solver.solve(70, N=10, save_displacement=True)
 # coupled_solver.solve_ep_save_Ta(70, "saved_Ta_L2", "L2_mesh")
 # coupled_solver.solve_ep_save_Ta(70, "saved_Ta_DG1", "DG1_mesh")
 time = np.arange(1, 70, 1)

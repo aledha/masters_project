@@ -185,9 +185,7 @@ class MonodomainSolver:
         theta (float): parameter for operator splitting. theta=1/2 gives Strang splitting. theta between 0 and 1.
     """
 
-    def set_rectangular_mesh(
-        self, L: tuple[float, float, float], ode_element: tuple[str, int]
-    ):
+    def set_rectangular_mesh(self, L: tuple[float, float, float], ode_element: tuple[str, int]):
         """Set rectangular mesh
 
         Args:
@@ -286,9 +284,7 @@ class MonodomainSolver:
             t (fem.Constant): time at last timestep.
         """
         if vtx_title:
-            vtx = io.VTXWriter(
-                MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.v_pde], engine="BP4"
-            )
+            vtx = io.VTXWriter(MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.v_pde], engine="BP4")
         while self.t.value < T + self.dt:
             self.step()
             if vtx_title:

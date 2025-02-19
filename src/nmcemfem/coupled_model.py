@@ -4,13 +4,12 @@ from mpi4py import MPI
 import ufl
 import numpy as np
 from dataclasses import dataclass
-import src.monodomain as monodomain
-import src.hyperelasticity as hyperelasticity
-from src.utils import pprint
-import sys
+import nmcemfem.monodomain as monodomain
+import nmcemfem.hyperelasticity as hyperelasticity
+from nmcemfem.utils import pprint
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 func_dir = Path(__file__).parents[1] / "saved_funcs"
 
 
@@ -29,9 +28,7 @@ class WeaklyCoupledModel:
 
     def _transfer_lmbda(self, N: int = 10):
         f = self.mech.F * self.mech.f0
-        lmbda_exp = fem.Expression(
-            ufl.sqrt(f**2), self.ep.pde.V_ode.element.interpolation_points()
-        )
+        lmbda_exp = fem.Expression(ufl.sqrt(f**2), self.ep.pde.V_ode.element.interpolation_points())
         lmbda_func = fem.Function(self.ep.pde.V_ode)
         lmbda_func.interpolate(lmbda_exp)
         lmbda = lmbda_func.x.petsc_vec[:]
@@ -141,11 +138,11 @@ class WeaklyCoupledModel:
         saveto_file: str,
     ):
         vtx = io.VTXWriter(
-                MPI.COMM_WORLD,
-                (func_dir / saveto_file).with_suffix(".bp"),
-                [self.mech.u],
-                engine="BP4",
-            )
+            MPI.COMM_WORLD,
+            (func_dir / saveto_file).with_suffix(".bp"),
+            [self.mech.u],
+            engine="BP4",
+        )
         with io.XDMFFile(
             MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "r"
         ) as xdmf:

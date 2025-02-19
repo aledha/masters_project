@@ -3,11 +3,9 @@ from dolfinx import io
 import ufl
 from mpi4py import MPI
 from pathlib import Path
-import sys
 
-sys.path.append("../")
 
-from src.hyperelasticity import HyperelasticProblem
+from nmcemfem.hyperelasticity import HyperelasticProblem
 
 
 problem = HyperelasticProblem(h=0.2, lagrange_order=2)

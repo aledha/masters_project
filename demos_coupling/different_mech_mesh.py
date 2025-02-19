@@ -4,10 +4,8 @@ from pathlib import Path
 import adios4dolfinx
 from dolfinx import io, fem
 from mpi4py import MPI
-import sys
 
-sys.path.append("../")
-from src.hyperelasticity import HyperelasticProblem
+from nmcemfem.hyperelasticity import HyperelasticProblem
 
 mech = HyperelasticProblem(1, 2)
 Lx, Ly, Lz = 3, 7, 20  # mm
@@ -29,9 +27,7 @@ mech.setup_solver()
 func_dir = Path(__file__).parents[1] / "saved_funcs"
 mesh_filename = "L2_mesh"
 function_filename = "saved_Ta_L2"
-with io.XDMFFile(
-    MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "r"
-) as xdmf:
+with io.XDMFFile(MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "r") as xdmf:
     in_mesh = xdmf.read_mesh()
 element = ("Lagrange", 2)
 V = fem.functionspace(in_mesh, element)
@@ -39,11 +35,11 @@ Ta_in = fem.Function(V)
 
 saveto_file = "saved ta"
 vtx = io.VTXWriter(
-                MPI.COMM_WORLD,
-                (func_dir / saveto_file).with_suffix(".bp"),
-                [Ta_in],
-                engine="BP4",
-            )
+    MPI.COMM_WORLD,
+    (func_dir / saveto_file).with_suffix(".bp"),
+    [Ta_in],
+    engine="BP4",
+)
 time = np.arange(1, 70, 1)
 
 for t in time:
@@ -57,4 +53,3 @@ for t in time:
     mech.solve()
     vtx.write(t)
 vtx.close()
-
