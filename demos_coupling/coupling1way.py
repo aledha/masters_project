@@ -1,8 +1,8 @@
 import numpy as np
 import ufl
-from pathlib import Path
-import basix
-from dolfinx import mesh
+import logging
+
+logging.basicConfig(level=logging.INFO)
 from pint import UnitRegistry
 
 ureg = UnitRegistry()
@@ -64,9 +64,7 @@ long_conductivity = intra_long * extra_long / (intra_long + extra_long)
 trans_conductivity_scaled = (trans_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
 long_conductivity_scaled = (long_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
 M = ufl.tensors.as_tensor(
-    np.diag(
-        [trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled]
-    )
+    np.diag([trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled])
 )
 
 ep_solver.set_conductivity(M)
@@ -104,6 +102,7 @@ coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
 # coupled_solver.solve_ep_save_Ta(70, "saved_Ta_L2", "L2_mesh")
 # coupled_solver.solve_ep_save_Ta(70, "saved_Ta_DG1", "DG1_mesh")
 time = np.arange(1, 70, 1)
+
 coupled_solver.solve_mech_with_saved_Ta(
     function_filename="saved_Ta_DG1",
     mesh_filename="DG1_mesh",

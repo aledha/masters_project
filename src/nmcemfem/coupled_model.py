@@ -81,9 +81,7 @@ class WeaklyCoupledModel:
             pprint(f"Solved EP for t={np.round(self.t.value, 2)}", self.domain)
             if n % N == 0:
                 self._transfer_Ta()
-                log.set_log_level(log.LogLevel.INFO)
                 self.mech.solve()
-                log.set_log_level(log.LogLevel.DEBUG)
             if save_displacement:
                 vtx.write(self.t.value)
         if save_displacement:
@@ -120,6 +118,7 @@ class WeaklyCoupledModel:
             function_filename (str): file to save tension to.
             mesh_filename (str): file to save mesh to.
         """
+
         with io.XDMFFile(
             MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "w"
         ) as xdmf:
@@ -157,9 +156,7 @@ class WeaklyCoupledModel:
                 name="Ta",
             )
             self._transfer_Ta(Ta_in)
-            log.set_log_level(log.LogLevel.INFO)
             self.mech.solve()
-            log.set_log_level(log.LogLevel.DEBUG)
 
         else:
             for t in time:
@@ -170,9 +167,7 @@ class WeaklyCoupledModel:
                     name="Ta",
                 )
                 self._transfer_Ta(Ta_in)
-                log.set_log_level(log.LogLevel.DEBUG)
                 self.mech.solve()
-                log.set_log_level(log.LogLevel.ERROR)
                 vtx.write(t)
                 pprint(f"Solved for t={t}", self.domain)
             vtx.close()

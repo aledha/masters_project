@@ -1,4 +1,4 @@
-from dolfinx import fem, mesh, default_scalar_type, io, log
+from dolfinx import fem, mesh, default_scalar_type
 import numpy as np
 from mpi4py import MPI
 import ufl
