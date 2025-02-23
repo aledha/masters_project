@@ -1,13 +1,16 @@
-import adios4dolfinx
-from dolfinx import fem, io, log
-from mpi4py import MPI
-import ufl
-import numpy as np
 from dataclasses import dataclass
-import nmcemfem.monodomain as monodomain
-import nmcemfem.hyperelasticity as hyperelasticity
-from nmcemfem.utils import pprint
 from pathlib import Path
+
+from mpi4py import MPI
+
+import adios4dolfinx
+import numpy as np
+import ufl
+from dolfinx import fem, io
+
+import nmcemfem.hyperelasticity as hyperelasticity
+import nmcemfem.monodomain as monodomain
+from nmcemfem.utils import pprint
 
 
 @dataclass
@@ -43,7 +46,8 @@ class WeaklyCoupledModel:
         """Transfer tension from EP model to mechanics model.
 
         Args:
-            Ta (fem.Function | None, optional): Tension function. If None (Default), gets tension from EP.
+            Ta (fem.Function | None, optional): Tension function.
+                If None (Default), gets tension from EP.
         """
         if Ta:
             Ta_array = Ta.x.petsc_vec
@@ -116,9 +120,7 @@ class WeaklyCoupledModel:
             mesh_filename (Path): file to save mesh to.
         """
 
-        with io.XDMFFile(
-            MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "w"
-        ) as xdmf:
+        with io.XDMFFile(MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "w") as xdmf:
             xdmf.write_mesh(self.ep.domain)
         while self.t.value < T:
             self.ep.step()
@@ -139,9 +141,7 @@ class WeaklyCoupledModel:
             [self.mech.u],
             engine="BP4",
         )
-        with io.XDMFFile(
-            MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "r"
-        ) as xdmf:
+        with io.XDMFFile(MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "r") as xdmf:
             in_mesh = xdmf.read_mesh()
         V = fem.functionspace(in_mesh, element)
         Ta_in = fem.Function(V)

@@ -1,7 +1,8 @@
 # From https://computationalphysiology.github.io/zero-mech/examples/electro-mechanics/electro_mechanics.html
 from pathlib import Path
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.optimize import root
 
 from nmcemfem.monodomain import ODESolver

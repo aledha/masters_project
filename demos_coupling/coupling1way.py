@@ -1,16 +1,17 @@
+import logging
+from pathlib import Path
+
 import numpy as np
 import ufl
-from pathlib import Path
-import logging
-
-logging.basicConfig(level=logging.INFO)
 from pint import UnitRegistry
 
+from nmcemfem.coupled_model import WeaklyCoupledModel
+from nmcemfem.hyperelasticity import HyperelasticProblem
+from nmcemfem.monodomain import MonodomainSolver
+
+logging.basicConfig(level=logging.INFO)
 ureg = UnitRegistry()
 
-from nmcemfem.monodomain import MonodomainSolver
-from nmcemfem.hyperelasticity import HyperelasticProblem
-from nmcemfem.coupled_model import WeaklyCoupledModel
 
 initial_states = {
     "V": -85.23,  # mV

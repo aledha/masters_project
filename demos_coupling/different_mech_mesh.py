@@ -1,9 +1,11 @@
+from pathlib import Path
+
+from mpi4py import MPI
+
+import adios4dolfinx
 import numpy as np
 import ufl
-from pathlib import Path
-import adios4dolfinx
-from dolfinx import io, fem
-from mpi4py import MPI
+from dolfinx import fem, io
 
 from nmcemfem.hyperelasticity import HyperelasticProblem
 

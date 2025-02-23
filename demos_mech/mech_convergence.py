@@ -1,10 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from dolfinx import io, fem
-from mpi4py import MPI
-import ufl
 from pathlib import Path
 
+from mpi4py import MPI
+
+import matplotlib.pyplot as plt
+import numpy as np
+import ufl
+from dolfinx import fem, io
 
 from nmcemfem.hyperelasticity import HyperelasticProblem
 from nmcemfem.utils import interpolate_to_mesh
@@ -69,7 +70,7 @@ def convergence_plot(h_fine, hs, plot_title, lagrange_order=2):
     ax.loglog(hs, errors, "-o", label="order = {:.3f}".format(order))
     ax.set_xlabel(r"$h$")
     ax.set_ylabel("Error")
-    ax.set_title(f"Convergence plot of hyperelastic problem")
+    ax.set_title("Convergence plot of hyperelastic problem")
     ax.legend()
     figure_dir = Path(__file__).parents[1] / "saved_figures"
     fig.savefig(figure_dir / plot_title, bbox_inches="tight")
