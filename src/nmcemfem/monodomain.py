@@ -7,13 +7,7 @@ import ufl
 from pathlib import Path
 from dataclasses import dataclass
 import importlib
-import sys
 import ufl.tensors
-
-main_dir = Path(__file__).parents[1]
-figure_dir = main_dir / "saved_figures"
-func_dir = main_dir / "saved_funcs"
-sys.path.append(str(main_dir))
 
 
 class PDESolver:
