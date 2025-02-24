@@ -1,11 +1,14 @@
-from dolfinx import fem, mesh, default_scalar_type, io, log
-import numpy as np
-from mpi4py import MPI
-import ufl
-from scifem import NewtonSolver
 from dataclasses import dataclass
+
+from mpi4py import MPI
+
+import numpy as np
+import ufl
 import ufl.geometry
-from src.utils import pprint
+from dolfinx import default_scalar_type, fem, mesh
+from scifem import NewtonSolver
+
+from nmcemfem.utils import pprint
 
 
 @dataclass
@@ -98,9 +101,7 @@ class HyperelasticProblem:
         self.bcs.append(fem.dirichletbc(u_bc, dofs, self.V))
 
     def _dirichlet2(self, val: float, tag: int, facet_tag: mesh.MeshTags):
-        dofs = fem.locate_dofs_topological(
-            self.V.sub(val), facet_tag.dim, facet_tag.find(tag)
-        )
+        dofs = fem.locate_dofs_topological(self.V.sub(val), facet_tag.dim, facet_tag.find(tag))
         self.bcs.append(fem.dirichletbc(default_scalar_type(0), dofs, self.V.sub(val)))
 
     def _neumann(self, val: float, tag: int, facet_tag: mesh.MeshTags):
@@ -124,13 +125,15 @@ class HyperelasticProblem:
         """Apply Dirichlet (type 1 or 2) and/or Neumann boundary conditions
 
         Args:
-            boundaries (list of callables): functions that returns boolean if coordinate is near boundary
+            boundaries (list of callables): functions returning true if coordinate is near boundary
             vals (list of floats):
                 if Dirichlet type 1: value to hold u at
                 if Dirichlet type 2: dimension to restrict u
                 if Neumann: traction value
-            bc_types (list of strings): choice of boundary conditions: d1 (dirichlet type 1), d2 (dirichlet type 2), or n (neumann)
-            tags (list of ints): tags to assign boundary. Defaults to None, in which case it will be assigned automatically
+            bc_types (list of strings): choice of boundary conditions:
+                d1 (dirichlet type 1), d2 (dirichlet type 2), or n (neumann)
+            tags (list of ints): tags to assign boundary.
+                Defaults to None, in which case it will be assigned automatically
         """
         if not tags:
             tags = range(1, len(boundaries) + 1)

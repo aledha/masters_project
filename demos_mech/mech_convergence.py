@@ -1,15 +1,15 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from dolfinx import io, fem
-from mpi4py import MPI
-import ufl
 from pathlib import Path
-import sys
 
-sys.path.append("../")
+from mpi4py import MPI
 
-from src.hyperelasticity import HyperelasticProblem
-from src.utils import interpolate_to_mesh
+import matplotlib.pyplot as plt
+import numpy as np
+import ufl
+from dolfinx import fem, io
+
+from nmcemfem.hyperelasticity import HyperelasticProblem
+from nmcemfem.utils import interpolate_to_mesh
+
 
 def solve(h, lagrange_order=2, save_solution=False):
     problem = HyperelasticProblem(h, lagrange_order)
@@ -64,22 +64,20 @@ def convergence_plot(h_fine, hs, plot_title, lagrange_order=2):
     for i in range(len(hs)):
         errors[i] = L2_diff_coarse_fine(hs[i], u_fine, lagrange_order=lagrange_order)
 
-    order = (np.log(errors[-1]) - np.log(errors[-2])) / (
-        np.log(hs[-1]) - np.log(hs[-2])
-    )
+    order = (np.log(errors[-1]) - np.log(errors[-2])) / (np.log(hs[-1]) - np.log(hs[-2]))
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.loglog(hs, errors, "-o", label="order = {:.3f}".format(order))
     ax.set_xlabel(r"$h$")
     ax.set_ylabel("Error")
-    ax.set_title(f"Convergence plot of hyperelastic problem")
+    ax.set_title("Convergence plot of hyperelastic problem")
     ax.legend()
     figure_dir = Path(__file__).parents[1] / "saved_figures"
     fig.savefig(figure_dir / plot_title, bbox_inches="tight")
     fig.show()
 
 
-#solve(h=0.1, save_solution=True)
+# solve(h=0.1, save_solution=True)
 h_fine = 0.075
 hs = [0.1, 0.15, 0.2, 0.3, 0.4]
 convergence_plot(h_fine, hs, "mech_convergence.png")

@@ -1,17 +1,16 @@
-import adios4dolfinx
-from dolfinx import fem, io, log
-from mpi4py import MPI
-import ufl
-import numpy as np
 from dataclasses import dataclass
-import src.monodomain as monodomain
-import src.hyperelasticity as hyperelasticity
-from src.utils import pprint
-import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-func_dir = Path(__file__).parents[1] / "saved_funcs"
+from mpi4py import MPI
+
+import adios4dolfinx
+import numpy as np
+import ufl
+from dolfinx import fem, io
+
+import nmcemfem.hyperelasticity as hyperelasticity
+import nmcemfem.monodomain as monodomain
+from nmcemfem.utils import pprint
 
 
 @dataclass
@@ -29,9 +28,7 @@ class WeaklyCoupledModel:
 
     def _transfer_lmbda(self, N: int = 10):
         f = self.mech.F * self.mech.f0
-        lmbda_exp = fem.Expression(
-            ufl.sqrt(f**2), self.ep.pde.V_ode.element.interpolation_points()
-        )
+        lmbda_exp = fem.Expression(ufl.sqrt(f**2), self.ep.pde.V_ode.element.interpolation_points())
         lmbda_func = fem.Function(self.ep.pde.V_ode)
         lmbda_func.interpolate(lmbda_exp)
         lmbda = lmbda_func.x.petsc_vec[:]
@@ -49,7 +46,8 @@ class WeaklyCoupledModel:
         """Transfer tension from EP model to mechanics model.
 
         Args:
-            Ta (fem.Function | None, optional): Tension function. If None (Default), gets tension from EP.
+            Ta (fem.Function | None, optional): Tension function.
+                If None (Default), gets tension from EP.
         """
         if Ta:
             Ta_array = Ta.x.petsc_vec
@@ -60,7 +58,7 @@ class WeaklyCoupledModel:
         self.Ta_ode.x.array[:] = Ta_array
         self.mech.set_tension(self.Ta_ode)
 
-    def solve(self, T: float, N: int = 10, save_displacement: bool = False):
+    def solve(self, T: float, N: int = 10, save_tofile: Path | bool = False):
         """Solve weakly coupled model until end time T.
         Solves EP at each step, and solves mechanics at each Nth step.
         Mech is more expensive to solve than EP.
@@ -70,10 +68,10 @@ class WeaklyCoupledModel:
             N (int, optional): Number of. Defaults to 10.
             save_displacement (bool, optional): Option to save solution. Defaults to False.
         """
-        if save_displacement:
+        if save_tofile is not False:
             vtx = io.VTXWriter(
                 MPI.COMM_WORLD,
-                func_dir / "coupling1way.bp",
+                save_tofile.with_suffix(".bp"),
                 [self.mech.u],
                 engine="BP4",
             )
@@ -84,48 +82,45 @@ class WeaklyCoupledModel:
             pprint(f"Solved EP for t={np.round(self.t.value, 2)}", self.domain)
             if n % N == 0:
                 self._transfer_Ta()
-                log.set_log_level(log.LogLevel.INFO)
                 self.mech.solve()
-                log.set_log_level(log.LogLevel.DEBUG)
-            if save_displacement:
+            if save_tofile is not False:
                 vtx.write(self.t.value)
-        if save_displacement:
+        if save_tofile is not False:
             vtx.close()
 
-    def _save_Ta(self, function_filename: str):
+    def _save_Ta(self, function_file: Path):
         """Save tension to file using adios4dolfinx.
 
         Args:
-            function_filename (str): file to save tension to
+            function_file (Path): file to save tension to
         """
         Ta_array = self.ep.ode.model.monitor_values(
             self.t.value, self.ep.ode.states, self.ep.ode.params
         )[self.Ta_index]
         self.Ta_ode.x.array[:] = Ta_array
-        if (func_dir / function_filename).with_suffix(".bp").exists():
+        if function_file.with_suffix(".bp").exists():
             writemode = adios4dolfinx.adios2_helpers.adios2.Mode.Append
         else:
             writemode = adios4dolfinx.adios2_helpers.adios2.Mode.Write
 
         adios4dolfinx.write_function_on_input_mesh(
-            (func_dir / function_filename).with_suffix(".bp"),
+            function_file.with_suffix(".bp"),
             self.Ta_ode,
             mode=writemode,
             time=np.round(self.t.value, 2),
             name="Ta",
         )
 
-    def solve_ep_save_Ta(self, T: float, function_filename: str, mesh_filename: str):
+    def solve_ep_save_Ta(self, T: float, function_filename: Path, mesh_filename: Path):
         """Solve EP and save tension to file.
 
         Args:
             T (float): end time
-            function_filename (str): file to save tension to.
-            mesh_filename (str): file to save mesh to.
+            function_filename (Path): file to save tension to.
+            mesh_filename (Path): file to save mesh to.
         """
-        with io.XDMFFile(
-            MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "w"
-        ) as xdmf:
+
+        with io.XDMFFile(MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "w") as xdmf:
             xdmf.write_mesh(self.ep.domain)
         while self.t.value < T:
             self.ep.step()
@@ -134,48 +129,42 @@ class WeaklyCoupledModel:
 
     def solve_mech_with_saved_Ta(
         self,
-        function_filename: str,
-        mesh_filename: str,
+        function_filename: Path,
+        mesh_filename: Path,
         time: float | np.ndarray,
         element: tuple[str, int],
-        saveto_file: str,
+        saveto_file: Path,
     ):
         vtx = io.VTXWriter(
-                MPI.COMM_WORLD,
-                (func_dir / saveto_file).with_suffix(".bp"),
-                [self.mech.u],
-                engine="BP4",
-            )
-        with io.XDMFFile(
-            MPI.COMM_WORLD, (func_dir / mesh_filename).with_suffix(".xdmf"), "r"
-        ) as xdmf:
+            MPI.COMM_WORLD,
+            saveto_file.with_suffix(".bp"),
+            [self.mech.u],
+            engine="BP4",
+        )
+        with io.XDMFFile(MPI.COMM_WORLD, mesh_filename.with_suffix(".xdmf"), "r") as xdmf:
             in_mesh = xdmf.read_mesh()
         V = fem.functionspace(in_mesh, element)
         Ta_in = fem.Function(V)
         if isinstance(time, float) or isinstance(time, int):
             adios4dolfinx.read_function(
-                (func_dir / function_filename).with_suffix(".bp"),
+                function_filename.with_suffix(".bp"),
                 Ta_in,
                 time=time,
                 name="Ta",
             )
             self._transfer_Ta(Ta_in)
-            log.set_log_level(log.LogLevel.INFO)
             self.mech.solve()
-            log.set_log_level(log.LogLevel.DEBUG)
 
         else:
             for t in time:
                 adios4dolfinx.read_function(
-                    (func_dir / function_filename).with_suffix(".bp"),
+                    function_filename.with_suffix(".bp"),
                     Ta_in,
                     time=t,
                     name="Ta",
                 )
                 self._transfer_Ta(Ta_in)
-                log.set_log_level(log.LogLevel.DEBUG)
                 self.mech.solve()
-                log.set_log_level(log.LogLevel.ERROR)
                 vtx.write(t)
                 pprint(f"Solved for t={t}", self.domain)
             vtx.close()

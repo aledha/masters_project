@@ -1,14 +1,12 @@
-import numpy as np
-from dolfinx import io
-import ufl
-from mpi4py import MPI
 from pathlib import Path
-import sys
 
-sys.path.append("../")
+from mpi4py import MPI
 
-from src.hyperelasticity import HyperelasticProblem
+import numpy as np
+import ufl
+from dolfinx import io
 
+from nmcemfem.hyperelasticity import HyperelasticProblem
 
 problem = HyperelasticProblem(h=0.2, lagrange_order=2)
 L = (1, 1, 1)

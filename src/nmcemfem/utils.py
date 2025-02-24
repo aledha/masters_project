@@ -1,8 +1,9 @@
+from pathlib import Path
+
 import dolfinx
+import gotranx
 import numpy as np
 import packaging
-import gotranx
-from pathlib import Path
 
 dolfinx_version = packaging.version.parse(dolfinx.__version__)
 

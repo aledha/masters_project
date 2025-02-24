@@ -1,17 +1,17 @@
+import logging
+from pathlib import Path
+
 import numpy as np
 import ufl
-from pathlib import Path
-import basix
-from dolfinx import mesh
 from pint import UnitRegistry
 
-ureg = UnitRegistry()
-import sys
+from nmcemfem.coupled_model import WeaklyCoupledModel
+from nmcemfem.hyperelasticity import HyperelasticProblem
+from nmcemfem.monodomain import MonodomainSolver
 
-sys.path.append("../")
-from src.monodomain import MonodomainSolver
-from src.hyperelasticity import HyperelasticProblem
-from src.coupled_model import WeaklyCoupledModel
+logging.basicConfig(level=logging.INFO)
+ureg = UnitRegistry()
+
 
 initial_states = {
     "V": -85.23,  # mV
@@ -66,9 +66,7 @@ long_conductivity = intra_long * extra_long / (intra_long + extra_long)
 trans_conductivity_scaled = (trans_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
 long_conductivity_scaled = (long_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
 M = ufl.tensors.as_tensor(
-    np.diag(
-        [trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled]
-    )
+    np.diag([trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled])
 )
 
 ep_solver.set_conductivity(M)
@@ -101,15 +99,18 @@ bc_types = ["d2", "d2", "d2"]
 mech_solver.boundary_conditions(boundaries, vals, bc_types)
 mech_solver.setup_solver()
 
+func_dir = Path(__file__).parents[1] / "saved_funcs"
+
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-#coupled_solver.solve(70, N=10, save_displacement=True)
-# coupled_solver.solve_ep_save_Ta(70, "saved_Ta_L2", "L2_mesh")
-# coupled_solver.solve_ep_save_Ta(70, "saved_Ta_DG1", "DG1_mesh")
+coupled_solver.solve(70, N=10, save_tofile=func_dir / "coupling1way2")
+# coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_L2", func_dir/"L2_mesh")
+# coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_DG1", func_dir/"DG1_mesh")
 time = np.arange(1, 70, 1)
+
 coupled_solver.solve_mech_with_saved_Ta(
-    function_filename="saved_Ta_DG1",
-    mesh_filename="DG1_mesh",
+    function_filename=func_dir / "saved_Ta_DG1",
+    mesh_filename=func_dir / "DG1_mesh",
     time=time,
     element=("DG", 1),
-    saveto_file="u_with_saved_TaDG1",
+    saveto_file=func_dir / "u_with_saved_TaDG1",
 )

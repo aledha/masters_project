@@ -133,3 +133,5 @@ dmypy.json
 *.bp
 .DS_store
 **/__pycache__
+
+odes/*.py

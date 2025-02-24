@@ -1,14 +1,14 @@
 # From https://computationalphysiology.github.io/zero-mech/examples/electro-mechanics/electro_mechanics.html
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.optimize import root
-import sys
 
-sys.path.append("../")
-from src.monodomain import ODESolver
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import root
+
+from nmcemfem.monodomain import ODESolver
 
 figure_dir = Path(__file__).parents[1] / "saved_figures"
+
 
 def subplus(x):
     if x > 0:
@@ -50,20 +50,12 @@ class zeroD_coupling:
         L1 = (
             Ta
             + a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
-            + 2
-            * lmbda**2
-            * af
-            * subplus(lmbda**2 - 1)
-            * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
+            + 2 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             + p
         )
         L2 = (
             2 * a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
-            + 4
-            * lmbda**2
-            * af
-            * subplus(lmbda**2 - 1)
-            * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
+            + 4 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             - p
         )
         return np.array([L1, L2], dtype=np.float64)
@@ -105,20 +97,12 @@ class zeroD_coupling:
         L1 = (
             Ta
             + a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
-            + 2
-            * lmbda**2
-            * af
-            * subplus(lmbda**2 - 1)
-            * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
+            + 2 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             + p
         )
         L2 = (
             2 * a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
-            + 4
-            * lmbda**2
-            * af
-            * subplus(lmbda**2 - 1)
-            * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
+            + 4 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             - p
         )
         return np.array([L1, L2], dtype=np.float64)
@@ -135,9 +119,7 @@ class zeroD_coupling:
             self.dLambdas[i] = (self.lmbdas[i] - self.lmbdas[i - 1]) / self.dt
             self.V[i] = self.states[self.V_index]
             self.Ca[i] = self.states[self.Ca_index]
-            self.Ta[i] = self.monitor_values(ti, self.states, self.params)[
-                self.Ta_index
-            ]
+            self.Ta[i] = self.monitor_values(ti, self.states, self.params)[self.Ta_index]
 
     def plot(self, filename):
         fig, ax = plt.subplots(2, 3, sharex=True)
@@ -159,6 +141,7 @@ class zeroD_coupling:
             axi.grid()
         fig.tight_layout()
         fig.savefig(figure_dir / filename)
+
 
 weakcoupling = zeroD_coupling(dt=0.1, T=400)
 weakcoupling.solve_weak()

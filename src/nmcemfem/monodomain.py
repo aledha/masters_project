@@ -1,19 +1,15 @@
-from dolfinx import fem, mesh, io
-import dolfinx.fem.petsc as petsc
-from petsc4py import PETSc
-import numpy as np
-from mpi4py import MPI
-import ufl
-from pathlib import Path
-from dataclasses import dataclass
 import importlib
-import sys
-import ufl.tensors
+from dataclasses import dataclass
+from pathlib import Path
 
-main_dir = Path(__file__).parents[1]
-figure_dir = main_dir / "saved_figures"
-func_dir = main_dir / "saved_funcs"
-sys.path.append(str(main_dir))
+from mpi4py import MPI
+from petsc4py import PETSc
+
+import dolfinx.fem.petsc as petsc
+import numpy as np
+import ufl
+import ufl.tensors
+from dolfinx import fem, io, mesh
 
 
 class PDESolver:
@@ -48,9 +44,11 @@ class PDESolver:
 
         Args:
             M (ufl.tensors.ListTensor): Conductivity tensor,
-            I_stim (function): takes in spatial coordinate x and time t and outputs the stimulating current in that point.
+            I_stim (function): takes in spatial coordinate x and time t and
+                outputs the stimulating current in that point.
             dt (float): timestep
-            theta (float): parameter for operator splitting. theta=1/2 gives Strang splitting. theta between 0 and 1.
+            theta (float): parameter for operator splitting.
+                theta=1/2 gives Strang splitting. theta between 0 and 1.
             solver_type (str): "PREONLY" for a direct method, "CG" for an iterative method
         """
         v = ufl.TrialFunction(self.V_pde)
@@ -88,6 +86,23 @@ class PDESolver:
         self.v_ode.x.scatter_forward()
 
 
+def compile_ode(odefile, scheme) -> bool:
+    try:
+        import gotranx
+    except ModuleNotFoundError:
+        raise ImportError("gotranx not found. Please install gotranx.")
+    ode_path = (Path(__file__).parent / "odes" / odefile).with_suffix(".ode")
+    if not ode_path.exists():
+        raise ValueError(f"Could not find {ode_path}")
+    if MPI.COMM_WORLD.rank == 0:
+        loaded_ode = gotranx.load_ode(ode_path)
+        code = gotranx.cli.gotran2py.get_code(loaded_ode, scheme=[gotranx.schemes.Scheme[scheme]])
+        with open(ode_path.with_suffix(".py"), "w") as f:
+            f.write(code)
+    MPI.COMM_WORLD.barrier()
+    return ode_path.with_suffix(".py").exists()
+
+
 class ODESolver:
     def __init__(
         self,
@@ -96,23 +111,30 @@ class ODESolver:
         num_nodes: int,
         v_name: str = "v",
         initial_states: dict | None = None,
+        recompile_ode: bool = False,
     ):
         """Intialize ODESolver instance
 
         Args:
             odefile (str): name of .ode file in odes/
-            scheme (str): scheme to use for solving ODEs. Either "forward_explicit_euler" or "generalized_rush_larsen".
+            scheme (str): scheme to use for solving ODEs.
+                Either "forward_explicit_euler" or "generalized_rush_larsen".
             num_nodes (int): number of nodes (locally or globally)
-            initial_states (dict or None): dictionary of initial states. If None (Default), uses default from .ode file.
+            initial_states (dict or None): dictionary of initial states.
+                If None (Default), uses default from .ode file.
             v_name (str): name of transmembrane potential in .odefile. Defaults to "v".
-
+            recompile_ode (bool): recompile ode file. Defaults to False.
         Raises:
             ImportError: if odefile cannot be found.
         """
+        if recompile_ode:
+            compile_ode(odefile, scheme)
         try:
-            self.model = importlib.import_module(f"odes.{odefile}")
+            # Try importing python module if exists
+            self.model = importlib.import_module(f".odes.{odefile}", package=__package__)
         except ImportError as e:
-            raise ImportError(f"Failed to import {odefile}: {e}")
+            recompile_ode = compile_ode(odefile, scheme)
+            self.model = importlib.import_module(f".odes.{odefile}", package=__package__)
 
         if initial_states:
             init = self.model.init_state_values(**initial_states)
@@ -182,12 +204,11 @@ class MonodomainSolver:
     Args:
         h (float): spatial step size
         dt (float): temporal step size
-        theta (float): parameter for operator splitting. theta=1/2 gives Strang splitting. theta between 0 and 1.
+        theta (float): parameter for operator splitting.
+            theta=1/2 gives Strang splitting. theta between 0 and 1.
     """
 
-    def set_rectangular_mesh(
-        self, L: tuple[float, float, float], ode_element: tuple[str, int]
-    ):
+    def set_rectangular_mesh(self, L: tuple[float, float, float], ode_element: tuple[str, int]):
         """Set rectangular mesh
 
         Args:
@@ -216,8 +237,10 @@ class MonodomainSolver:
 
         Args:
             odefile (str): name of .ode file found in odes/
-            scheme (str): scheme to use for solving ODEs. Either "forward_explicit_euler" or "generalized_rush_larsen".
-            initial_states (dict or None): dictionary of initial states. If none, uses default from .ode file.
+            scheme (str): scheme to use for solving ODEs.
+                Either "forward_explicit_euler" or "generalized_rush_larsen".
+            initial_states (dict or None): dictionary of initial states.
+                If None, uses default from .ode file.
             v_name (str): name of transmembrane potential in .odefile. Defaults to "v".
         """
         # num_nodes = self.pde.V_ode.dofmap.index_map.size_local
@@ -230,7 +253,8 @@ class MonodomainSolver:
         """Set stimulating current. = 1/(chi*C_m) * I_stim
 
         Args:
-            I_stim (function): takes in spatial coordinate x and time t and outputs the stimulating current in that point.
+            I_stim (function): takes in spatial coordinate x and time t
+                and outputs the stimulating current in that point.
         """
         self.ode.set_param("stim_amplitude", 0)
         self.I_stim = I_stim(self.x, self.t)
@@ -244,10 +268,11 @@ class MonodomainSolver:
         self.M = M
 
     def setup_solver(self, solver_type: str = "PREONLY"):
-        """Setup solver. set_conductivity, set_stimulus, and set_cell_model should be called prior to this function.
+        """Setup solver. set_conductivity, set_stimulus, and set_cell_model should be called prior.
 
         Args:
-            solver_type (str, optional): "PREONLY" for a direct method, "CG" for an iterative method. Defaults to "PREONLY".
+            solver_type (str, optional): "PREONLY" for a direct method, "CG" for an iterative method
+                Defaults to "PREONLY".
         """
         self.pde.setup_pde_solver(self.M, self.I_stim, self.dt, self.theta, solver_type)
 
@@ -278,17 +303,17 @@ class MonodomainSolver:
 
         Args:
             T (float): end time
-            vtx_title (str | None, optional): Filename to save solution to. Does not save if None. Defaults to None.
+            vtx_title (str | None, optional): Filename to save solution to. Does not save if None.
+                Defaults to None.
 
         Returns:
-            v_pde (fem.Function): Transmembrane potential function at last timestep. In PDE space ("Lagrange", 1).
+            v_pde (fem.Function): Transmembrane potential function at last timestep.
+                In PDE space ("Lagrange", 1).
             x (ufl.SpatialCoordinate): spatial coordinate of domain.
             t (fem.Constant): time at last timestep.
         """
         if vtx_title:
-            vtx = io.VTXWriter(
-                MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.v_pde], engine="BP4"
-            )
+            vtx = io.VTXWriter(MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.v_pde], engine="BP4")
         while self.t.value < T + self.dt:
             self.step()
             if vtx_title:
