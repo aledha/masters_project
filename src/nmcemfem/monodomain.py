@@ -85,6 +85,23 @@ class PDESolver:
         self.v_ode.x.scatter_forward()
 
 
+def compile_ode(odefile, scheme) -> bool:
+    try:
+        import gotranx
+    except ModuleNotFoundError:
+        raise ImportError("gotranx not found. Please install gotranx.")
+    ode_path = (Path(__file__).parent / "odes" / odefile).with_suffix(".ode")
+    if not ode_path.exists():
+        raise ValueError(f"Could not find {ode_path}")
+    if MPI.COMM_WORLD.rank == 0:
+        loaded_ode = gotranx.load_ode(ode_path)
+        code = gotranx.cli.gotran2py.get_code(loaded_ode, scheme=[gotranx.schemes.Scheme[scheme]])
+        with open(ode_path.with_suffix(".py"), "w") as f:
+            f.write(code)
+    MPI.COMM_WORLD.barrier()
+    return ode_path.with_suffix(".py").exists()
+
+
 class ODESolver:
     def __init__(
         self,
@@ -93,6 +110,7 @@ class ODESolver:
         num_nodes: int,
         v_name: str = "v",
         initial_states: dict | None = None,
+        recompile_ode: bool = False,
     ):
         """Intialize ODESolver instance
 
@@ -104,14 +122,18 @@ class ODESolver:
             initial_states (dict or None): dictionary of initial states.
                 If None (Default), uses default from .ode file.
             v_name (str): name of transmembrane potential in .odefile. Defaults to "v".
-
+            recompile_ode (bool): recompile ode file. Defaults to False.
         Raises:
             ImportError: if odefile cannot be found.
         """
+        if recompile_ode:
+            compile_ode(odefile, scheme)
         try:
-            self.model = importlib.import_module(f"odes.{odefile}")
+            # Try importing python module if exists
+            self.model = importlib.import_module(f".odes.{odefile}", package=__package__)
         except ImportError as e:
-            raise ImportError(f"Failed to import {odefile}: {e}")
+            recompile_ode = compile_ode(odefile, scheme)
+            self.model = importlib.import_module(f".odes.{odefile}", package=__package__)
 
         if initial_states:
             init = self.model.init_state_values(**initial_states)

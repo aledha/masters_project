@@ -102,7 +102,7 @@ mech_solver.setup_solver()
 func_dir = Path(__file__).parents[1] / "saved_funcs"
 
 coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-coupled_solver.solve(70, N=10, save_tofile=func_dir/"coupling1way2")
+coupled_solver.solve(70, N=10, save_tofile=func_dir / "coupling1way2")
 # coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_L2", func_dir/"L2_mesh")
 # coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_DG1", func_dir/"DG1_mesh")
 time = np.arange(1, 70, 1)

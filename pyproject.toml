@@ -14,7 +14,7 @@ dependencies = ["fenics-dolfinx>=0.9.0", "scifem", "gotranx", "adios4dolfinx"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"mypkg.odes" = ["*.ode"]
+"nmcemfem.odes" = ["*.ode"]
 
 
 [project.optional-dependencies]
