@@ -79,6 +79,7 @@ class PDESolver:
 
     def solve_pde_step(self):
         """Take one step of PDE solver"""
+        self.v_pde.interpolate(self.v_ode)
         self.b.x.array[:] = 0
         petsc.assemble_vector(self.b.x.petsc_vec, self.compiled_L)
         self.solver.solve(self.b.x.petsc_vec, self.v_pde.x.petsc_vec)

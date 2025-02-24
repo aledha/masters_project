@@ -83,8 +83,8 @@ class WeaklyCoupledModel:
             if n % N == 0:
                 self._transfer_Ta()
                 self.mech.solve()
-            if save_tofile is not False:
-                vtx.write(self.t.value)
+                if save_tofile is not False:
+                    vtx.write(self.t.value)
         if save_tofile is not False:
             vtx.close()
 

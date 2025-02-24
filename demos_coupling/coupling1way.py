@@ -38,79 +38,86 @@ h = 0.5
 dt = 0.05
 theta = 1
 
-ep_solver = MonodomainSolver(h, dt, theta)
+def solve_model_problem(ode_element, Ta_element, filename, T):
+    ep_solver = MonodomainSolver(h, dt, theta)
 
-Lx, Ly, Lz = 3, 7, 20  # mm
-L = (Lx, Ly, Lz)
-ode_element = ("DG", 1)
+    Lx, Ly, Lz = 3, 7, 20  # mm
+    L = (Lx, Ly, Lz)
+
+    ep_solver.set_rectangular_mesh(L, ode_element)
+
+    ep_solver.set_cell_model(
+        odefile="tentusscher_land_1way",
+        scheme="generalized_rush_larsen",
+        initial_states=initial_states,
+        v_name="V",
+    )
+
+    chi = 1400 * ureg("1/cm")
+    C_m = 1 * ureg("uF/cm**2")
+
+    intra_trans, extra_trans = 0.019 * ureg("S/m"), 0.24 * ureg("S/m")  # Sm^-1
+    intra_long, extra_long = 0.17 * ureg("S/m"), 0.62 * ureg("S/m")
+    trans_conductivity = intra_trans * extra_trans / (intra_trans + extra_trans)
+    long_conductivity = intra_long * extra_long / (intra_long + extra_long)
+
+    trans_conductivity_scaled = (trans_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
+    long_conductivity_scaled = (long_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
+    M = ufl.tensors.as_tensor(
+        np.diag([trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled])
+    )
+
+    ep_solver.set_conductivity(M)
+
+    stim_amplitude = 50000 * ureg("uA/cm**3")
+    amplitude_magnitude = (stim_amplitude / (C_m * chi)).to("mV/ms").magnitude
+
+
+    def I_stim(x, t):
+        condition = ufl.And(ufl.And(x[0] <= 1.5, x[1] <= 1.5), ufl.And(x[2] <= 1.5, t <= 2))
+        return ufl.conditional(condition, amplitude_magnitude, 0)
+
+
+    ep_solver.set_stimulus(I_stim)
+    ep_solver.setup_solver()
+
+    mech_solver = HyperelasticProblem(h=h, lagrange_order=2)
+    f0 = ufl.unit_vector(2, 3)
+    s0 = ufl.unit_vector(1, 3)
+    mech_solver.set_existing_domain(ep_solver.domain, f0, s0, Ta_element)
+    # mech_solver.set_rectangular_domain(L, f0, s0)
+
+    left = lambda x: np.isclose(x[0], 0)
+    front = lambda x: np.isclose(x[1], 0)
+    bottom = lambda x: np.isclose(x[2], 0)
+
+    boundaries = [left, front, bottom]
+    vals = [0, 1, 2]
+    bc_types = ["d2", "d2", "d2"]
+    mech_solver.boundary_conditions(boundaries, vals, bc_types)
+    mech_solver.setup_solver()
+
+    func_dir = Path(__file__).parents[1] / "saved_funcs"
+
+    coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
+    coupled_solver.solve(T, N=10, save_tofile=func_dir / "weak_coupling" / filename)
+    # coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_L2", func_dir/"L2_mesh")
+    # coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_DG1", func_dir/"DG1_mesh")
+    time = np.arange(1, 70, 1)
+
+    # coupled_solver.solve_mech_with_saved_Ta(
+    #     function_filename=func_dir / "saved_Ta_DG1",
+    #     mesh_filename=func_dir / "DG1_mesh",
+    #     time=time,
+    #     element=("DG", 1),
+    #     saveto_file=func_dir / "u_with_saved_TaDG1",
+    # )
 
 # element = basix.ufl.quadrature_element(scheme="default", degree=4, cell=ufl_cell().cellname())
+ode_element = ("DG", 1)
+Ta_element = ("DG", 1)
+solve_model_problem(ode_element, Ta_element, "DG1_ode-DG1_Ta", 60)
 
-ep_solver.set_rectangular_mesh(L, ode_element)
-
-ep_solver.set_cell_model(
-    odefile="tentusscher_land_1way",
-    scheme="generalized_rush_larsen",
-    initial_states=initial_states,
-    v_name="V",
-)
-
-chi = 1400 * ureg("1/cm")
-C_m = 1 * ureg("uF/cm**2")
-
-intra_trans, extra_trans = 0.019 * ureg("S/m"), 0.24 * ureg("S/m")  # Sm^-1
-intra_long, extra_long = 0.17 * ureg("S/m"), 0.62 * ureg("S/m")
-trans_conductivity = intra_trans * extra_trans / (intra_trans + extra_trans)
-long_conductivity = intra_long * extra_long / (intra_long + extra_long)
-
-trans_conductivity_scaled = (trans_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
-long_conductivity_scaled = (long_conductivity / (chi * C_m)).to("mm**2/ms").magnitude
-M = ufl.tensors.as_tensor(
-    np.diag([trans_conductivity_scaled, trans_conductivity_scaled, long_conductivity_scaled])
-)
-
-ep_solver.set_conductivity(M)
-
-stim_amplitude = 50000 * ureg("uA/cm**3")
-amplitude_magnitude = (stim_amplitude / (C_m * chi)).to("mV/ms").magnitude
-
-
-def I_stim(x, t):
-    condition = ufl.And(ufl.And(x[0] <= 1.5, x[1] <= 1.5), ufl.And(x[2] <= 1.5, t <= 2))
-    return ufl.conditional(condition, amplitude_magnitude, 0)
-
-
-ep_solver.set_stimulus(I_stim)
-ep_solver.setup_solver()
-
-mech_solver = HyperelasticProblem(h=0.5, lagrange_order=2)
-f0 = ufl.unit_vector(2, 3)
-s0 = ufl.unit_vector(1, 3)
-mech_solver.set_existing_domain(ep_solver.domain, f0, s0)
-# mech_solver.set_rectangular_domain(L, f0, s0)
-
-left = lambda x: np.isclose(x[0], 0)
-front = lambda x: np.isclose(x[1], 0)
-bottom = lambda x: np.isclose(x[2], 0)
-
-boundaries = [left, front, bottom]
-vals = [0, 1, 2]
-bc_types = ["d2", "d2", "d2"]
-mech_solver.boundary_conditions(boundaries, vals, bc_types)
-mech_solver.setup_solver()
-
-func_dir = Path(__file__).parents[1] / "saved_funcs"
-
-coupled_solver = WeaklyCoupledModel(ep_solver, mech_solver)
-coupled_solver.solve(70, N=10, save_tofile=func_dir / "coupling1way2")
-# coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_L2", func_dir/"L2_mesh")
-# coupled_solver.solve_ep_save_Ta(70, func_dir/"saved_Ta_DG1", func_dir/"DG1_mesh")
-time = np.arange(1, 70, 1)
-
-coupled_solver.solve_mech_with_saved_Ta(
-    function_filename=func_dir / "saved_Ta_DG1",
-    mesh_filename=func_dir / "DG1_mesh",
-    time=time,
-    element=("DG", 1),
-    saveto_file=func_dir / "u_with_saved_TaDG1",
-)
+ode_element = ("Lagrange", 2)
+Ta_element = ("DG", 1)
+solve_model_problem(ode_element, Ta_element, "L2_ode-DG1_Ta", 60)

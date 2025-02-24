@@ -23,7 +23,7 @@ class HyperelasticProblem:
         self.trialstates = []
         self.L = ufl.as_ufl(0.0)
 
-    def _init_functions(self):
+    def _init_functions(self, Ta_element: tuple[str, int]):
         self.V = fem.functionspace(
             self.domain, ("Lagrange", self.lagrange_order, (self.domain.geometry.dim,))
         )
@@ -46,8 +46,8 @@ class HyperelasticProblem:
         self.C = ufl.variable(self.F.T * self.F)
         self.J = ufl.variable(ufl.det(self.F))
 
-        self.T_space = fem.functionspace(self.domain, ("DG", 0))
-        self.Ta = fem.Function(self.T_space)
+        self.Ta_space = fem.functionspace(self.domain, Ta_element)
+        self.Ta = fem.Function(self.Ta_space, name="Tension")
 
     def _init_invariants(self, f0: ufl.tensors.ListTensor, s0: ufl.tensors.ListTensor):
         self.f0 = f0
@@ -63,6 +63,7 @@ class HyperelasticProblem:
         L: tuple[float, float, float],
         f0: ufl.tensors.ListTensor,
         s0: ufl.tensors.ListTensor,
+        Ta_element: tuple[str, int],
     ):
         """Set rectangular domain.
 
@@ -78,11 +79,12 @@ class HyperelasticProblem:
             [[0, 0, 0], [Lx, Ly, Lz]],
             n=[int(Lx / self.h), int(Ly / self.h), int(Lz / self.h)],
         )
-        self._init_functions()
+        self._init_functions(Ta_element)
         self._init_invariants(f0, s0)
 
     def set_existing_domain(
-        self, domain: mesh.Mesh, f0: ufl.tensors.ListTensor, s0: ufl.tensors.ListTensor
+        self, domain: mesh.Mesh, f0: ufl.tensors.ListTensor, s0: ufl.tensors.ListTensor, Ta_element: tuple[str, int]
+
     ):
         """Set existing domain
 
@@ -92,7 +94,7 @@ class HyperelasticProblem:
             s0 (ufl.tensors.ListTensor): transversal direction
         """
         self.domain = domain
-        self._init_functions()
+        self._init_functions(Ta_element)
         self._init_invariants(f0, s0)
 
     def _dirichlet1(self, val: float, tag: int, facet_tag: mesh.MeshTags):
