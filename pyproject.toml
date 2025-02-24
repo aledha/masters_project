@@ -6,7 +6,7 @@ name = "nmcemfem"
 version = "0.1.0"
 description = "Numerical modelling of cardiac electro-mechanics in FEniCSx"
 authors = [{ name = "Alexander Hatle" }]
-#license = { file = "LICENSE" }
+license = { file = "LICENSE" }
 readme = "README.md"
 dependencies = ["fenics-dolfinx>=0.9.0", "scifem", "gotranx", "adios4dolfinx"]
 
