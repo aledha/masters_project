@@ -47,18 +47,18 @@ class zeroD_coupling:
     def _func(self, x, Ta):
         lmbda, p = x
         a, b, af, bf = 2.28, 9.726, 1.685, 15.779
-        P11 = (
+        L1 = (
             Ta
             + a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
             + 2 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             + p
         )
-        P22 = (
-            a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
-            + 2 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
+        L2 = (
+            2 * a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
+            + 4 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             - p
         )
-        return np.array([P11, P22], dtype=np.float64)
+        return np.array([L1, L2], dtype=np.float64)
 
     def _step(self, i, ti):
         self.states = self.odesolver(self.states, ti, self.dt, self.params)
@@ -94,18 +94,18 @@ class zeroD_coupling:
         Ta = self.monitor_values(ti, states_new, self.params)[self.Ta_index]
 
         a, b, af, bf = 2.28, 9.726, 1.685, 15.779
-        P11 = (
+        L1 = (
             Ta
             + a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
             + 2 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             + p
         )
-        P22 = (
-            a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
-            + 2 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
+        L2 = (
+            2 * a * (lmbda**2 - 1 / lmbda) * np.exp(b * (lmbda**2 + 2 / lmbda - 3))
+            + 4 * lmbda**2 * af * subplus(lmbda**2 - 1) * np.exp(bf * subplus(lmbda**2 - 1) ** 2)
             - p
         )
-        return np.array([P11, P22], dtype=np.float64)
+        return np.array([L1, L2], dtype=np.float64)
 
     def solve_monolithic(self):
         for i, ti in enumerate(self.t):
