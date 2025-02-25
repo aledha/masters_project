@@ -5,6 +5,7 @@ from pathlib import Path
 from mpi4py import MPI
 from petsc4py import PETSc
 
+import basix
 import dolfinx.fem.petsc as petsc
 import numpy as np
 import ufl
@@ -21,7 +22,15 @@ class PDESolver:
             ode_element (tuple[str, int]): element to use for the ODE space. Example ("Lagrange", 2)
         """
         self.domain = domain
-        self.V_ode = fem.functionspace(domain, ode_element)
+        self.ode_element = ode_element
+        if ode_element[0] == "Q":
+            element = basix.ufl.quadrature_element(
+                scheme="default", degree=ode_element[1], cell=domain.ufl_cell().cellname()
+            )
+            self.V_ode = fem.functionspace(domain, element)
+        else:
+            self.V_ode = fem.functionspace(domain, ode_element)
+
         pde_element = ("Lagrange", 1)
         self.V_pde = fem.functionspace(domain, pde_element)
 
@@ -77,13 +86,29 @@ class PDESolver:
             self.solver.getPC().setType(PETSc.PC.Type.SOR)
         self.solver.setOperators(A)
 
+    def interp_v_ode_to_pde(self):
+        print(self.V_pde.element.interpolation_points())
+        print(self.V_ode.element.interpolation_points())
+        if self.ode_element[0] == "Q":
+            expr = fem.Expression(self.v_ode, self.V_ode.element.interpolation_points())
+            self.v_pde.interpolate(expr)
+        else:
+            self.v_pde.interpolate(self.v_ode)
+
+    def interp_v_pde_to_ode(self):
+        if self.ode_element[0] == "Q":
+            expr = fem.Expression(self.v_pde, self.V_ode.element.interpolation_points())
+            self.v_ode.interpolate(expr)
+        else:
+            self.v_ode.interpolate(self.v_pde)
+
     def solve_pde_step(self):
         """Take one step of PDE solver"""
-        self.v_pde.interpolate(self.v_ode)
+        self.interp_v_ode_to_pde()
         self.b.x.array[:] = 0
         petsc.assemble_vector(self.b.x.petsc_vec, self.compiled_L)
         self.solver.solve(self.b.x.petsc_vec, self.v_pde.x.petsc_vec)
-        self.v_ode.interpolate(self.v_pde)
+        self.interp_v_pde_to_ode()
         self.v_ode.x.scatter_forward()
 
 

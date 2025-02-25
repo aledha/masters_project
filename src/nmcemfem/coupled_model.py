@@ -56,7 +56,12 @@ class WeaklyCoupledModel:
                 self.t.value, self.ep.ode.states, self.ep.ode.params
             )[self.Ta_index]
         self.Ta_ode.x.array[:] = Ta_array
-        self.mech.set_tension(self.Ta_ode)
+
+        if self.ep.pde.ode_element[0] == "Q":
+            expr = fem.Expression(self.Ta_ode, self.mech.Ta_space.element.interpolation_points())
+            self.Ta.interpolate(expr)
+        else:
+            self.Ta.interpolate(self.Ta_ode)
 
     def solve(self, T: float, N: int = 10, save_tofile: Path | bool = False):
         """Solve weakly coupled model until end time T.
