@@ -35,7 +35,7 @@ def forward_euler(states, t, dt, params):
     return output
 
 
-def error(h, dt, theta, T, quad_degree):
+def error(h, dt, theta, T, quad_degree, vtx_title = None):
     N = int(np.ceil(1 / h))
 
     mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
@@ -100,12 +100,12 @@ def error(h, dt, theta, T, quad_degree):
     v_ex_func = lambda x, t: ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1]) * ufl.sin(t)
     v_ex_expr = dolfinx.fem.Expression(v_ex_func(x, t), V_pde.element.interpolation_points())
     v_ex = dolfinx.fem.Function(V_pde, name="v_exact")
-
-    vtx = dolfinx.io.VTXWriter(MPI.COMM_WORLD, "mono_conv.bp", [v_pde, v_ex], engine="BP4")
+    if vtx_title:
+        vtx = dolfinx.io.VTXWriter(MPI.COMM_WORLD, "mono_conv.bp", [v_pde, v_ex], engine="BP4")
 
     while t.value < T:
         coefficients = evaluate_operands(operators)
-        evaluate_external_operators(operators, coefficients)
+        states_old.x.petsc_vec[:] = evaluate_external_operators(operators, coefficients)
 
         with solver.b.localForm() as b_loc:
             b_loc.set(0)
@@ -117,20 +117,19 @@ def error(h, dt, theta, T, quad_degree):
         solver.solver.solve(solver.b, v_pde.x.petsc_vec)
         v_pde.x.scatter_forward()
 
-        states_old.interpolate(states.ref_coefficient)
         t.value += dt
         v_ex.interpolate(v_ex_expr)
+        if vtx_title:
+            vtx.write(t.value)
 
-        vtx.write(t.value)
-
-    vtx.close()
-
+    if vtx_title:
+        vtx.close()
     error = dolfinx.fem.form((v_pde - v_ex) ** 2 * dx)
     E = np.sqrt(mesh.comm.allreduce(dolfinx.fem.assemble_scalar(error), MPI.SUM))
     return E
 
 
-# print(error(0.1, 0.01, 1.0, 1, 2))
+print(error(0.1, 0.01, 1.0, 1, 2))
 
 
 def dual_convergence_plot(hs, dts, theta, T, quad_degree=4, plot_title=None):
