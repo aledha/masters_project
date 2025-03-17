@@ -1,3 +1,5 @@
+from typing import Callable, Optional
+
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -13,6 +15,46 @@ from dolfinx_external_operator import (
     evaluate_operands,
     replace_external_operators,
 )
+from dolfinx.nls.petsc import NewtonSolver
+
+
+# From dolfinx-external-operator/doc/demo/solvers.py
+class NonlinearProblemWithCallback(dolfinx.fem.petsc.NonlinearProblem):
+    """Problem for the DOLFINx NewtonSolver with an external callback.
+
+    It lets `NewtonSolver` to run an additional routine `external_callback`
+    before vector and matrix assembly. This may be useful to perform additional
+    calculations at each Newton iteration. In particular, external operators
+    must be evaluated via this routine.
+    """
+
+    def __init__(
+        self,
+        F: ufl.form.Form,
+        u: dolfinx.fem.function.Function,
+        bcs: list[dolfinx.fem.bcs.DirichletBC] = [],
+        J: ufl.form.Form = None,
+        form_compiler_options: Optional[dict] = None,
+        jit_options: Optional[dict] = None,
+        external_callback: Optional[Callable] = lambda: None,
+    ):
+        super().__init__(F, u, bcs, J, form_compiler_options, jit_options)
+
+        self.external_callback = external_callback
+
+    def form(self, x: PETSc.Vec) -> None:
+        """This function is called before the residual or Jacobian is
+        computed. This is usually used to update ghost values, but here
+        we also use it to evaluate the external operators.
+
+        Args:
+           x: The vector containing the latest solution
+        """
+        # The following line is from the standard NonlinearProblem class
+        x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+
+        # The external operators are evaluated here
+        self.external_callback()
 
 
 def v_exact_func(x, t):
@@ -26,12 +68,14 @@ def s_exact_func(x, t):
 def states_exact_func(x, t):
     return ufl.as_vector((v_exact_func(x, t), s_exact_func(x, t)))
 
+
 def forward_euler(states, t, dt, params):
     v, s = states
     output = np.zeros_like(states)
     output[0] = v - s * dt
     output[1] = s + v * dt
     return output
+
 
 def error_opsplit(h, dt, theta, T=1.0, quad_degree=4, vtx_title=False):
     N = int(np.ceil(1 / h))
@@ -118,6 +162,7 @@ def error_opsplit(h, dt, theta, T=1.0, quad_degree=4, vtx_title=False):
     E = np.sqrt(comm.allreduce(dolfinx.fem.assemble_scalar(error), MPI.SUM))
     vtx.close()
     return E
+
 
 def error_states_ext(h, dt, theta, T, quad_degree, vtx_title=None):
     N = int(np.ceil(1 / h))
@@ -305,6 +350,99 @@ def error_I_ion_ext(h, dt, theta, T, quad_degree, vtx_title=None):
     return E
 
 
+def error_ufl_backwards_euler(h, dt, theta, T, quad_degree, vtx_title=None):
+    N = int(np.ceil(1 / h))
+
+    mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
+    dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": quad_degree})
+
+    t = dolfinx.fem.Constant(mesh, 0.0)
+    x = ufl.SpatialCoordinate(mesh)
+
+    # Setup ODE
+    V_ode_element = basix.ufl.quadrature_element(
+        cell=mesh.ufl_cell().cellname(), degree=quad_degree, value_shape=(2,), scheme="default"
+    )
+    V_ode = dolfinx.fem.functionspace(mesh, V_ode_element)
+
+    states = dolfinx.fem.Function(V_ode)
+    v_ode, s_ode = ufl.split(states)
+
+    states_n = dolfinx.fem.Function(V_ode)
+    states_n.interpolate(
+        dolfinx.fem.Expression(states_exact_func(x, t), V_ode.element.interpolation_points())
+    )
+    v_n, s_n = ufl.split(states_n)
+
+    v_test, s_test = ufl.TestFunction(V_ode)
+
+    F1 = (v_ode - v_n + dt * s_ode) * v_test * dx
+    F2 = (s_ode - s_n - dt * v_ode) * s_test * dx
+    F = F1 + F2
+
+    backwards_euler_problem = dolfinx.fem.petsc.NonlinearProblem(F, states)
+    backwards_euler_solver = NewtonSolver(MPI.COMM_WORLD, backwards_euler_problem)
+
+    # Setup PDE
+    V_pde = dolfinx.fem.functionspace(mesh, ("Lagrange", 1))
+    v = ufl.TrialFunction(V_pde)
+    phi = ufl.TestFunction(V_pde)
+
+    v_pde = dolfinx.fem.Function(V_pde)
+    v_pde.interpolate(lambda x: 0 * x[0])
+    v_pde_expr = dolfinx.fem.Expression(v_pde, V_ode.element.interpolation_points())
+
+    I_stim = 8 * ufl.pi**2 * ufl.sin(t) * ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1])
+
+    a = phi * v * dx + dt * theta * ufl.inner(ufl.grad(phi), ufl.grad(v)) * dx
+    L = phi * v_ode * dx + dt * phi * I_stim * dx
+
+    L_compiled = dolfinx.fem.form(L)
+
+    solver = dolfinx.fem.petsc.LinearProblem(a, L_compiled, u=v_pde)
+    dolfinx.fem.petsc.assemble_matrix(solver.A, solver.a)
+    solver.A.assemble()
+
+    v_exact_func = lambda x, t: ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1]) * ufl.sin(t)
+    v_exact_expr = dolfinx.fem.Expression(v_exact_func(x, t), V_pde.element.interpolation_points())
+    v_exact = dolfinx.fem.Function(V_pde, name="v_exact")
+    if vtx_title:
+        vtx = dolfinx.io.VTXWriter(MPI.COMM_WORLD, "mono_conv.bp", [v_pde, v_exact], engine="BP4")
+
+    while t.value < T:
+        backwards_euler_solver.solve(states)
+
+        with solver.b.localForm() as b_loc:
+            b_loc.set(0)
+        dolfinx.fem.petsc.assemble_vector(solver.b, solver.L)
+        solver.b.ghostUpdate(
+            addv=PETSc.InsertMode.ADD,
+            mode=PETSc.ScatterMode.REVERSE,
+        )
+        solver.solver.solve(solver.b, v_pde.x.petsc_vec)
+        v_pde.x.scatter_forward()
+
+        # Update previous states
+        states_n.interpolate(states)
+
+        # Following line gives: AttributeError: 'Indexed' object has no attribute 'interpolate'
+        # v_ode.interpolate(v_pde_expr)
+        # ? How do I interpolate the expression into a ufl.split function?
+        # Could make a subspace of V_ode, interpolate v_pde_expr into a function of that subspace?
+
+        t.value += dt
+        v_exact.interpolate(v_exact_expr)
+        if vtx_title:
+            vtx.write(t.value)
+
+    if vtx_title:
+        vtx.close()
+    error = dolfinx.fem.form((v_pde - v_exact) ** 2 * dx)
+    E = np.sqrt(mesh.comm.allreduce(dolfinx.fem.assemble_scalar(error), MPI.SUM))
+    return E
+
+
+
 def dual_convergence_plot(hs, dts, theta, T, error_func, quad_degree=4, plot_title=None):
     num_spatial = len(hs)
     num_temporal = len(dts)
@@ -369,4 +507,7 @@ dual_convergence_plot(
 )
 dual_convergence_plot(
     hs, dts, theta=1.0, T=1, error_func=error_I_ion_ext, plot_title="convergence_opsplit.png"
+)
+dual_convergence_plot(
+    hs, dts, theta=1.0, T=1, error_func=error_ufl_backwards_euler, plot_title="convergence_ufl.png"
 )
