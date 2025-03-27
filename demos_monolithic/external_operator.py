@@ -15,7 +15,9 @@ from dolfinx_external_operator import (
     evaluate_operands,
     replace_external_operators,
 )
+
 from dolfinx.nls.petsc import NewtonSolver
+from scifem import NewtonSolver as NewtonSolver_scifem
 
 
 # From dolfinx-external-operator/doc/demo/solvers.py
@@ -350,7 +352,8 @@ def error_I_ion_ext(h, dt, theta, T, quad_degree, vtx_title=None):
     return E
 
 
-def error_ufl_backwards_euler(h, dt, theta, T, quad_degree, vtx_title=None):
+def error_mono_samespace(h, dt, theta, T, quad_degree, vtx_title=None):
+    # Uses scifem Newtonsolver, does not converge for low h
     N = int(np.ceil(1 / h))
 
     mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
@@ -358,89 +361,140 @@ def error_ufl_backwards_euler(h, dt, theta, T, quad_degree, vtx_title=None):
 
     t = dolfinx.fem.Constant(mesh, 0.0)
     x = ufl.SpatialCoordinate(mesh)
+    V = dolfinx.fem.functionspace(mesh, ("P", 1))
 
-    # Setup ODE
-    V_ode_element = basix.ufl.quadrature_element(
-        cell=mesh.ufl_cell().cellname(), degree=quad_degree, value_shape=(2,), scheme="default"
-    )
-    V_ode = dolfinx.fem.functionspace(mesh, V_ode_element)
+    v_h = dolfinx.fem.Function(V)
+    s_h = dolfinx.fem.Function(V)
+    v_old = dolfinx.fem.Function(V)
+    s_old = dolfinx.fem.Function(V)
 
-    states = dolfinx.fem.Function(V_ode)
-    v_ode, s_ode = ufl.split(states)
+    v_old.interpolate(dolfinx.fem.Expression(v_exact_func(x, t), V.element.interpolation_points()))
+    s_old.interpolate(dolfinx.fem.Expression(s_exact_func(x, t), V.element.interpolation_points()))
 
-    states_n = dolfinx.fem.Function(V_ode)
-    states_n.interpolate(
-        dolfinx.fem.Expression(states_exact_func(x, t), V_ode.element.interpolation_points())
-    )
-    v_n, s_n = ufl.split(states_n)
+    phi = ufl.TestFunction(V)
+    dv = ufl.TrialFunction(V)
 
-    v_test, s_test = ufl.TestFunction(V_ode)
-
-    F1 = (v_ode - v_n + dt * s_ode) * v_test * dx
-    F2 = (s_ode - s_n - dt * v_ode) * s_test * dx
-    F = F1 + F2
-
-    backwards_euler_problem = dolfinx.fem.petsc.NonlinearProblem(F, states)
-    backwards_euler_solver = NewtonSolver(MPI.COMM_WORLD, backwards_euler_problem)
-
-    # Setup PDE
-    V_pde = dolfinx.fem.functionspace(mesh, ("Lagrange", 1))
-    v = ufl.TrialFunction(V_pde)
-    phi = ufl.TestFunction(V_pde)
-
-    v_pde = dolfinx.fem.Function(V_pde)
-    v_pde.interpolate(lambda x: 0 * x[0])
-    v_pde_expr = dolfinx.fem.Expression(v_pde, V_ode.element.interpolation_points())
+    # Backwards Euler variational form
+    F1 = (v_h - v_old + dt * s_h) * phi * dx
+    F1 += (s_h - s_old - dt * v_h) * phi * dx
+    # F = F1 + F2
 
     I_stim = 8 * ufl.pi**2 * ufl.sin(t) * ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1])
 
-    a = phi * v * dx + dt * theta * ufl.inner(ufl.grad(phi), ufl.grad(v)) * dx
-    L = phi * v_ode * dx + dt * phi * I_stim * dx
+    # Monodomain variational form
+    F2 = phi * v_h * dx + dt * theta * ufl.inner(ufl.grad(phi), ufl.grad(v_h)) * dx
+    F2 -= phi * v_old * dx + dt * phi * I_stim * dx
+    F = [F1, F2]
 
-    L_compiled = dolfinx.fem.form(L)
+    # # Jacobian
+    states = [v_h, s_h]
+    trialstates = [dv, dv]
+    K = []
+    for f in F:
+        Kr = []
+        for state, trialstate in zip(states, trialstates):
+            Kr.append(ufl.derivative(f, state, trialstate))
+        K.append(Kr)
 
-    solver = dolfinx.fem.petsc.LinearProblem(a, L_compiled, u=v_pde)
-    dolfinx.fem.petsc.assemble_matrix(solver.A, solver.a)
-    solver.A.assemble()
+    petsc_options = {
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    solver = NewtonSolver_scifem(
+        F,
+        K,
+        states,
+        max_iterations=25,
+        petsc_options=petsc_options,
+    )
 
-    v_exact_func = lambda x, t: ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1]) * ufl.sin(t)
-    v_exact_expr = dolfinx.fem.Expression(v_exact_func(x, t), V_pde.element.interpolation_points())
-    v_exact = dolfinx.fem.Function(V_pde, name="v_exact")
-    if vtx_title:
-        vtx = dolfinx.io.VTXWriter(MPI.COMM_WORLD, "mono_conv.bp", [v_pde, v_exact], engine="BP4")
+    v_exact_expr = dolfinx.fem.Expression(v_exact_func(x, t), V.element.interpolation_points())
+    v_exact = dolfinx.fem.Function(V, name="v_exact")
 
     while t.value < T:
-        backwards_euler_solver.solve(states)
-
-        with solver.b.localForm() as b_loc:
-            b_loc.set(0)
-        dolfinx.fem.petsc.assemble_vector(solver.b, solver.L)
-        solver.b.ghostUpdate(
-            addv=PETSc.InsertMode.ADD,
-            mode=PETSc.ScatterMode.REVERSE,
-        )
-        solver.solver.solve(solver.b, v_pde.x.petsc_vec)
-        v_pde.x.scatter_forward()
-
+        solver.solve()
         # Update previous states
-        states_n.interpolate(states)
-
-        # Following line gives: AttributeError: 'Indexed' object has no attribute 'interpolate'
-        # v_ode.interpolate(v_pde_expr)
-        # ? How do I interpolate the expression into a ufl.split function?
-        # Could make a subspace of V_ode, interpolate v_pde_expr into a function of that subspace?
-
+        v_old.interpolate(v_h)
+        s_old.interpolate(s_h)
         t.value += dt
         v_exact.interpolate(v_exact_expr)
-        if vtx_title:
-            vtx.write(t.value)
 
-    if vtx_title:
-        vtx.close()
-    error = dolfinx.fem.form((v_pde - v_exact) ** 2 * dx)
+    error = dolfinx.fem.form((v_h - v_exact) ** 2 * dx)
     E = np.sqrt(mesh.comm.allreduce(dolfinx.fem.assemble_scalar(error), MPI.SUM))
     return E
 
+
+def error_mono_mixedspace(h, dt, theta, T, quad_degree, vtx_title=None):
+    N = int(np.ceil(1 / h))
+
+    mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
+    dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": quad_degree})
+
+    t = dolfinx.fem.Constant(mesh, 0.0)
+    x = ufl.SpatialCoordinate(mesh)
+    v_element = basix.ufl.element("Lagrange", cell=mesh.ufl_cell().cellname(), degree=1)
+    s_element = basix.ufl.quadrature_element(
+        cell=mesh.ufl_cell().cellname(), degree=quad_degree, scheme="default"
+    )
+    mixed_element = basix.ufl.mixed_element([v_element, s_element])
+    W = dolfinx.fem.functionspace(mesh, mixed_element)
+
+    w_h = dolfinx.fem.Function(W)
+    v_h, s_h = ufl.split(w_h)
+
+    w_old = dolfinx.fem.Function(W)
+
+    # From https://fenicsproject.discourse.group/t/how-to-correctly-assign-values-to-mixed-elements-in-fenics-x/6173/2
+    V_sub, V_to_W = W.sub(0).collapse()
+    S_sub, S_to_W = W.sub(1).collapse()
+
+    v_init = dolfinx.fem.Function(V_sub)
+    s_init = dolfinx.fem.Function(S_sub)
+
+    v_init.interpolate(
+        dolfinx.fem.Expression(v_exact_func(x, t), V_sub.element.interpolation_points())
+    )
+    s_init.interpolate(
+        dolfinx.fem.Expression(s_exact_func(x, t), S_sub.element.interpolation_points())
+    )
+
+    w_old.x.array[V_to_W] = v_init.x.array
+    w_old.x.array[S_to_W] = s_init.x.array
+
+    v_old, s_old = ufl.split(w_old)
+
+    v_test, s_test = ufl.TestFunctions(W)
+    dv, ds = ufl.TrialFunctions(W)
+
+    I_stim = 8 * ufl.pi**2 * ufl.sin(t) * ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1])
+
+    # Monodomain variational form
+    F1 = v_test * v_h * dx + dt * theta * ufl.inner(ufl.grad(v_test), ufl.grad(v_h)) * dx
+    F1 -= v_test * v_old * dx + dt * v_test * I_stim * dx
+
+    # Backwards Euler variational form
+    # ? Where to put v_test, s_test?
+    F2 = (v_h - v_old + dt * s_h) * v_test * dx
+    F2 += (s_h - s_old - dt * v_h) * s_test * dx
+
+    F = F1 + F2
+    problem = dolfinx.fem.petsc.NonlinearProblem(F, w_h)
+    solver = NewtonSolver(mesh.comm, problem)
+
+    v_exact_expr = dolfinx.fem.Expression(v_exact_func(x, t), V_sub.element.interpolation_points())
+    v_exact = dolfinx.fem.Function(V_sub, name="v_exact")
+
+    while t.value < T:
+        solver.solve(w_h)
+        # Update previous states
+        w_old.interpolate(w_h)
+        t.value += dt
+        v_exact.interpolate(v_exact_expr)
+
+    error = dolfinx.fem.form((v_h - v_exact) ** 2 * dx)
+    E = np.sqrt(mesh.comm.allreduce(dolfinx.fem.assemble_scalar(error), MPI.SUM))
+    return E
 
 
 def dual_convergence_plot(hs, dts, theta, T, error_func, quad_degree=4, plot_title=None):
@@ -499,15 +553,15 @@ def dual_convergence_plot(hs, dts, theta, T, error_func, quad_degree=4, plot_tit
 hs = [1 / (2**i) for i in range(6, 2, -1)]
 dts = [1 / (2**i) for i in range(7, 3, -1)]
 
+# dual_convergence_plot(
+#     hs, dts, theta=1.0, T=1, error_func=error_states_ext, plot_title="convergence_states_ext.png"
+# )
+# dual_convergence_plot(
+#     hs, dts, theta=1.0, T=1, error_func=error_I_ion_ext, plot_title="convergence_I_ion_ext.png"
+# )
+# dual_convergence_plot(
+#     hs, dts, theta=1.0, T=1, error_func=error_I_ion_ext, plot_title="convergence_opsplit.png"
+# )
 dual_convergence_plot(
-    hs, dts, theta=1.0, T=1, error_func=error_states_ext, plot_title="convergence_states_ext.png"
-)
-dual_convergence_plot(
-    hs, dts, theta=1.0, T=1, error_func=error_I_ion_ext, plot_title="convergence_I_ion_ext.png"
-)
-dual_convergence_plot(
-    hs, dts, theta=1.0, T=1, error_func=error_I_ion_ext, plot_title="convergence_opsplit.png"
-)
-dual_convergence_plot(
-    hs, dts, theta=1.0, T=1, error_func=error_ufl_backwards_euler, plot_title="convergence_ufl.png"
+    hs, dts, theta=1.0, T=1, error_func=error_mono_mixedspace, plot_title="convergence_mixed.png"
 )
