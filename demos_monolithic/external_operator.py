@@ -465,7 +465,6 @@ def error_mono_mixedspace(h, dt, theta, T, quad_degree, vtx_title=None):
     v_old, s_old = ufl.split(w_old)
 
     v_test, s_test = ufl.TestFunctions(W)
-    dv, ds = ufl.TrialFunctions(W)
 
     I_stim = 8 * ufl.pi**2 * ufl.sin(t) * ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1])
 

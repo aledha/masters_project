@@ -9,7 +9,7 @@ import dolfinx.fem.petsc as petsc
 import numpy as np
 import ufl
 import ufl.tensors
-from dolfinx import fem, io, mesh
+from dolfinx import fem, geometry, io, mesh
 
 
 class PDESolver:
@@ -299,13 +299,13 @@ class MonodomainSolver:
             self.t.value += (1 - self.theta) * self.dt
             self._transfer_ode_to_pde()
 
-    def solve(self, T: float, vtx_title: str | None = None):
+    def solve(self, T: float, vtx_title: Path | bool = False):
         """Solve electrophysiology without mechanics feedback.
 
         Args:
             T (float): end time
-            vtx_title (str | None, optional): Filename to save solution to. Does not save if None.
-                Defaults to None.
+            vtx_title (Path | Bool, optional): Filename to save solution to. Does not save if False.
+                Defaults to False.
 
         Returns:
             v_pde (fem.Function): Transmembrane potential function at last timestep.
@@ -314,10 +314,55 @@ class MonodomainSolver:
             t (fem.Constant): time at last timestep.
         """
         if vtx_title:
-            vtx = io.VTXWriter(MPI.COMM_WORLD, vtx_title + ".bp", [self.pde.v_pde], engine="BP4")
+            vtx = io.VTXWriter(
+                MPI.COMM_WORLD, vtx_title.with_suffix(".bp"), [self.pde.v_pde], engine="BP4"
+            )
         while self.t.value < T + self.dt:
             self.step()
             if vtx_title:
                 vtx.write(self.t.value)
 
         return self.pde.v_pde, self.pde.x, self.t
+
+    def solve_activation_times(self, points, line, T):
+        bb_tree = geometry.bb_tree(self.domain, self.domain.topology.dim)
+        # Find cells whose bounding-box collide with the the points
+        potential_colliding_cells_points = geometry.compute_collisions_points(bb_tree, points)
+        # Choose one of the cells that contains the point
+        adj_points = geometry.compute_colliding_cells(
+            self.domain, potential_colliding_cells_points, points
+        )
+        indices_points = np.flatnonzero(adj_points.offsets[1:] - adj_points.offsets[:-1])
+        cells_points = adj_points.array[adj_points.offsets[indices_points]]
+        points_on_proc = points[indices_points]
+
+        # Find cells whose bounding-box collide with the the points
+        potential_colliding_cells_line = geometry.compute_collisions_points(bb_tree, line)
+        # Choose one of the cells that contains the point
+        adj_line = geometry.compute_colliding_cells(
+            self.domain, potential_colliding_cells_line, line
+        )
+        indices_line = np.flatnonzero(adj_line.offsets[1:] - adj_line.offsets[:-1])
+        cells_line = adj_line.array[adj_line.offsets[indices_line]]
+        line_on_proc = line[indices_line]
+
+        times_points = -np.ones(len(points))
+        times_line = -np.ones(len(line))
+
+        while self.t.value <= T and np.min(times_points) < 0:
+            self.step()
+            evaluated_points = self.pde.vn.eval(points_on_proc, cells_points)
+            for i in range(len(points)):
+                if times_points[i] < 0 and evaluated_points[i] > 0:
+                    times_points[i] = np.round(
+                        self.t.value, 10
+                    )  # Eliminate machine error since it would be a multiple of dt
+
+            evaluated_lines = self.pde.vn.eval(line_on_proc, cells_line)
+            for i in range(len(line)):
+                if times_line[i] < 0 and evaluated_lines[i] > 0:
+                    times_line[i] = np.round(
+                        self.t.value, 10
+                    )  # Eliminate machine error since it would be a multiple of dt
+            print(f"t={np.round(self.t.value, 3)}")
+        return times_points, times_line
