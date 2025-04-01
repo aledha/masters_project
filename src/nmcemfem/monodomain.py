@@ -6,11 +6,16 @@ from mpi4py import MPI
 from petsc4py import PETSc
 
 import dolfinx.fem.petsc as petsc
+import basix.ufl
 import numpy as np
 import ufl
 import ufl.tensors
 from dolfinx import fem, geometry, io, mesh
+import logging
 
+from nmcemfem.utils import pprint
+
+logger = logging.getLogger(__name__)
 
 class PDESolver:
     def __init__(self, domain: mesh.Mesh, ode_element: tuple[str, int]):
@@ -21,7 +26,16 @@ class PDESolver:
             ode_element (tuple[str, int]): element to use for the ODE space. Example ("Lagrange", 2)
         """
         self.domain = domain
-        self.V_ode = fem.functionspace(domain, ode_element)
+        if ode_element[0] == "Q":
+            element = basix.ufl.quadrature_element(
+                cell=self.domain.ufl_cell().cellname(), degree=ode_element[1], scheme="default"
+            )
+            self.V_ode = fem.functionspace(domain, element)
+            self.dx = ufl.dx(domain=self.domain, metadata={"quadrature_degree": ode_element[1]})
+        else:
+            self.V_ode = fem.functionspace(domain, ode_element)
+            self.dx = ufl.dx(domain=self.domain, metadata={"quadrature_degree": 4})
+
         pde_element = ("Lagrange", 1)
         self.V_pde = fem.functionspace(domain, pde_element)
 
@@ -31,6 +45,7 @@ class PDESolver:
         self.v_ode = fem.Function(self.V_ode)
         self.v_pde = fem.Function(self.V_pde)
         self.v_pde.name = "membrane potential"
+        self.v_expr = fem.Expression(self.v_pde, self.V_ode.element.interpolation_points())
 
     def setup_pde_solver(
         self,
@@ -53,39 +68,27 @@ class PDESolver:
         """
         v = ufl.TrialFunction(self.V_pde)
         phi = ufl.TestFunction(self.V_pde)
-        dx = ufl.dx(domain=self.domain)
-        a = phi * v * dx + dt * theta * ufl.dot(ufl.grad(phi), M * ufl.grad(v)) * dx
+        a = phi * v * self.dx + dt * theta * ufl.dot(ufl.grad(phi), M * ufl.grad(v)) * self.dx
         L = (
-            phi * (self.v_pde + dt * I_stim) * dx
-            - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.v_pde)) * dx
+            phi * (self.v_ode + dt * I_stim) * self.dx
+            - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.v_ode)) * self.dx
         )
-        compiled_a = fem.form(a)
-        A = petsc.assemble_matrix(compiled_a)
-        A.assemble()
-        self.compiled_L = fem.form(L)
-        self.b = fem.Function(self.V_pde)
-
-        self.solver = PETSc.KSP().create(self.domain.comm)
-        if solver_type == "PREONLY":
-            self.solver.setType(PETSc.KSP.Type.PREONLY)
-            self.solver.getPC().setType(PETSc.PC.Type.LU)
-            self.solver.setErrorIfNotConverged(True)
-            self.solver.getPC().setFactorSolverType("mumps")
-        elif solver_type == "CG":
-            self.solver.setErrorIfNotConverged(True)
-            self.solver.setType(PETSc.KSP.Type.CG)
-            self.solver.getPC().setType(PETSc.PC.Type.SOR)
-        self.solver.setOperators(A)
+        self.solver = fem.petsc.LinearProblem(a, L, u=self.v_pde)
+        fem.petsc.assemble_matrix(self.solver.A, self.solver.a)
+        self.solver.A.assemble()
 
     def solve_pde_step(self):
         """Take one step of PDE solver"""
-        self.v_pde.interpolate(self.v_ode)
-        self.b.x.array[:] = 0
-        petsc.assemble_vector(self.b.x.petsc_vec, self.compiled_L)
-        self.solver.solve(self.b.x.petsc_vec, self.v_pde.x.petsc_vec)
-        self.v_ode.interpolate(self.v_pde)
-        self.v_ode.x.scatter_forward()
-
+        with self.solver.b.localForm() as b_loc:
+            b_loc.set(0)
+        fem.petsc.assemble_vector(self.solver.b, self.solver.L)
+        self.solver.b.ghostUpdate(
+            addv=PETSc.InsertMode.ADD,
+            mode=PETSc.ScatterMode.REVERSE,
+        )
+        self.solver.solve()
+        self.v_pde.x.scatter_forward()
+        self.v_ode.interpolate(self.v_expr)
 
 def compile_ode(odefile, scheme) -> bool:
     try:
@@ -244,6 +247,8 @@ class MonodomainSolver:
                 If None, uses default from .ode file.
             v_name (str): name of transmembrane potential in .odefile. Defaults to "v".
         """
+        # size_local is different from size of v_ode
+        # size_local = size(v_ode) + ghost nodes
         # num_nodes = self.pde.V_ode.dofmap.index_map.size_local
         num_nodes = self.pde.v_ode.x.array.shape[0]
         self.ode = ODESolver(
@@ -346,23 +351,32 @@ class MonodomainSolver:
         cells_line = adj_line.array[adj_line.offsets[indices_line]]
         line_on_proc = line[indices_line]
 
+        # Global
         times_points = -np.ones(len(points))
         times_line = -np.ones(len(line))
+        # Local
+        times_points_on_proc = -np.ones(len(points_on_proc))
+        times_line_on_proc = -np.ones(len(line_on_proc))
 
         while self.t.value <= T and np.min(times_points) < 0:
             self.step()
-            evaluated_points = self.pde.vn.eval(points_on_proc, cells_points)
-            for i in range(len(points)):
-                if times_points[i] < 0 and evaluated_points[i] > 0:
-                    times_points[i] = np.round(
-                        self.t.value, 10
-                    )  # Eliminate machine error since it would be a multiple of dt
+            evaluated_points = self.pde.v_pde.eval(points_on_proc, cells_points)
+            for i in range(len(points_on_proc)):
+                if times_points_on_proc[i] < 0 and evaluated_points[i] > 0:
+                    times_points_on_proc[i] = np.round(self.t.value, 3)
+                    times_points[indices_points[i]] = times_points_on_proc[i]
+                    logger.info(f"Point {indices_points[i]} activated")
 
-            evaluated_lines = self.pde.vn.eval(line_on_proc, cells_line)
-            for i in range(len(line)):
-                if times_line[i] < 0 and evaluated_lines[i] > 0:
-                    times_line[i] = np.round(
-                        self.t.value, 10
-                    )  # Eliminate machine error since it would be a multiple of dt
-            print(f"t={np.round(self.t.value, 3)}")
-        return times_points, times_line
+            evaluated_lines = self.pde.v_pde.eval(line_on_proc, cells_line)
+            for i in range(len(line_on_proc)):
+                if times_line_on_proc[i] < 0 and evaluated_lines[i] > 0:
+                    times_line_on_proc[i] = np.round(self.t.value, 3)
+                    times_line[indices_line[i]] = times_line_on_proc[i]
+            pprint(f"Solved for t = {np.round(self.t.value, 3)}", self.domain)
+
+        times_points_global = np.copy(times_points)
+        self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
+        times_line_global = np.copy(times_line)
+        self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
+
+        return times_points_global, times_line_global

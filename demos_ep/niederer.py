@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -32,13 +33,10 @@ initial_states = {
     "Na_i": 8.604,  # millimolar
     "K_i": 136.89,  # millimolar
 }
-h = 0.5
-dt = 0.05
-theta = 1
 
 
-def solve_model_problem(ode_element, filename, T):
-    ep_solver = MonodomainSolver(h, dt, theta)
+def solve_model_problem(h, dt, ode_element, T=80):
+    ep_solver = MonodomainSolver(h, dt, theta=1)
 
     Lx, Ly, Lz = 3, 7, 20  # mm
     L = (Lx, Ly, Lz)
@@ -77,15 +75,49 @@ def solve_model_problem(ode_element, filename, T):
 
     ep_solver.set_stimulus(I_stim)
     ep_solver.setup_solver()
-    ep_solver.solve()
+    points = np.array(
+        [
+            [0, 0, 0],
+            [0, Ly, 0],
+            [0, 0, Lz],
+            [0, Ly, Lz],
+            [Lx, 0, 0],
+            [Lx, Ly, 0],
+            [Lx, 0, Lz],
+            [Lx, Ly, Lz],
+            [Lx / 2, Ly / 2, Lz / 2],
+        ]
+    )
+    line = np.linspace([0, 0, 0], [Lx, Ly, Lz], 100)
+    times_points, times_line = ep_solver.solve_activation_times(points, line, T)
+
+    # Save data
+    data_directory = (
+        Path(__file__).parent
+        / "activation_times_data"
+        / f"h={h},dt={dt}"
+        / f"{ode_element[0]}{ode_element[1]}"
+    )
+    if ep_solver.mesh_comm.rank == 0:
+        if not os.path.exists(data_directory):
+            os.makedirs(data_directory)
+        np.savetxt(data_directory / "points.txt", times_points, fmt="%1.2f")
+        np.savetxt(data_directory / "line.txt", times_line, fmt="%1.2f")
+    print(f"Saved for h={h}, dt={dt}")
 
 
+def solve_benchmark(ode_element, skip = [], T=70):
+    hs = [0.5, 0.2, 0.1]
+    dts = [0.05, 0.01, 0.005]
+    for h in hs:
+        for dt in dts:
+            if [h, dt] not in skip:
+                solve_model_problem(h, dt, ode_element, T)
 
-# element = basix.ufl.quadrature_element(scheme="default", degree=4, cell=ufl_cell().cellname())
-ode_element = ("DG", 1)
-Ta_element = ("DG", 1)
-solve_model_problem(ode_element, Ta_element, "DG1_ode-DG1_Ta", 60)
 
-ode_element = ("Lagrange", 2)
-Ta_element = ("DG", 1)
-solve_model_problem(ode_element, Ta_element, "L2_ode-DG1_Ta", 60)
+ode_element = ("Q", 3)
+solve_model_problem(0.5, 0.05, ode_element)
+#solve_benchmark(ode_element, skip=[[0.5, 0.01], [0.5, 0.05], [0.5, 0.005], [0.2, 0.05]])
+
+#ode_element = ("P", 1)
+#solve_benchmark(ode_element)
