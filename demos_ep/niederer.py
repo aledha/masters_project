@@ -124,28 +124,16 @@ def read_file_plot_line(h, dt, elements):
     Lx, Ly, Lz = 3, 7, 20 #mm
     fig, ax = plt.subplots(figsize=(8,5))
     for element in elements:
-        activation_time_line = np.fromfile(data_directory / element / "line.txt")
+        activation_time_line = np.loadtxt(data_directory / element / "line.txt")
         dist = np.linspace(0, np.sqrt(Lx**2 + Ly**2 + Lz**2), len(activation_time_line))
         ax.plot(dist, activation_time_line, label=element)
     ax.set_ylabel('activation time (ms)')
     ax.set_xlabel('distance (mm)')
-    ax.set_ylim(0, 150)
     ax.grid(True)
     ax.set_title('Activation time along line')
     ax.legend()
-    fig.show()
+    fig.savefig(f"lineplot_h={h}_dt={dt}.png")
 
-read_file_plot_line(h=0.5, dt=0.05, elements=["Lagrange1", "Q2", "Q3", "Q4", "Q5"])
 ode_element = ("Q", 2)
-solve_model_problem(0.5, 0.05, ode_element)
-ode_element = ("Q", 5)
-solve_model_problem(0.5, 0.05, ode_element)
-
-ode_element = ("Q", 4)
 solve_model_problem(0.2, 0.05, ode_element)
-ode_element = ("Q", 3)
-solve_model_problem(0.2, 0.05, ode_element)
-#solve_benchmark(ode_element, skip=[[0.5, 0.01], [0.5, 0.05], [0.5, 0.005], [0.2, 0.05]])
-
-#ode_element = ("P", 1)
-#solve_benchmark(ode_element)
+#read_file_plot_line(h=0.5, dt=0.05, elements=["Lagrange1", "Q2", "Q3", "Q4", "Q5"])
