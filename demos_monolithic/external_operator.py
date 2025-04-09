@@ -9,14 +9,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import ufl
+from dolfinx.nls.petsc import NewtonSolver
 from dolfinx_external_operator import (
     FEMExternalOperator,
     evaluate_external_operators,
     evaluate_operands,
     replace_external_operators,
 )
-
-from dolfinx.nls.petsc import NewtonSolver
 from scifem import NewtonSolver as NewtonSolver_scifem
 
 
@@ -468,12 +467,14 @@ def error_mono_mixedspace(h, dt, theta, T, quad_degree, vtx_title=None):
 
     I_stim = 8 * ufl.pi**2 * ufl.sin(t) * ufl.cos(2 * ufl.pi * x[0]) * ufl.cos(2 * ufl.pi * x[1])
 
-    # Monodomain variational form
-    F1 = v_test * v_h * dx + dt * theta * ufl.inner(ufl.grad(v_test), ufl.grad(v_h)) * dx
-    F1 -= v_test * v_old * dx + dt * v_test * I_stim * dx
+    # Monodomain backward Euler (theta=0) variational form
+    # LHS
+    F1 = v_test * v_h * dx
+    # RHS
+    F1 -= v_test * (v_h + dt * I_stim) * dx
+    F1 += dt * ufl.dot(ufl.grad(v_test), ufl.grad(v_h)) * dx
 
-    # Backwards Euler variational form
-    # ? Where to put v_test, s_test?
+    # ODE backwards Euler variational form
     F2 = (v_h - v_old + dt * s_h) * v_test * dx
     F2 += (s_h - s_old - dt * v_h) * s_test * dx
 
@@ -562,5 +563,5 @@ dts = [1 / (2**i) for i in range(7, 3, -1)]
 #     hs, dts, theta=1.0, T=1, error_func=error_I_ion_ext, plot_title="convergence_opsplit.png"
 # )
 dual_convergence_plot(
-    hs, dts, theta=1.0, T=1, error_func=error_mono_mixedspace, plot_title="convergence_mixed.png"
+    hs, dts, theta=0.0, T=1, error_func=error_mono_mixedspace, plot_title="convergence_mixed.png"
 )
