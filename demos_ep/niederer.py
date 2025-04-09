@@ -36,7 +36,7 @@ initial_states = {
 }
 
 
-def solve_model_problem(h, dt, ode_element, T=80):
+def get_model_problem(h, dt, ode_element):
     ep_solver = MonodomainSolver(h, dt, theta=1)
 
     Lx, Ly, Lz = 3, 7, 20  # mm
@@ -76,6 +76,11 @@ def solve_model_problem(h, dt, ode_element, T=80):
 
     ep_solver.set_stimulus(I_stim)
     ep_solver.setup_solver()
+    return ep_solver, Lx, Ly, Lz
+
+
+def solve_model_problem(h, dt, ode_element, T=80):
+    ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
     points = np.array(
         [
             [0, 0, 0],
@@ -107,7 +112,7 @@ def solve_model_problem(h, dt, ode_element, T=80):
     print(f"Saved for h={h}, dt={dt}")
 
 
-def solve_benchmark(ode_element, skip = [], T=70):
+def solve_benchmark(ode_element, skip=[], T=70):
     hs = [0.5, 0.2, 0.1]
     dts = [0.05, 0.01, 0.005]
     for h in hs:
@@ -115,25 +120,28 @@ def solve_benchmark(ode_element, skip = [], T=70):
             if [h, dt] not in skip:
                 solve_model_problem(h, dt, ode_element, T)
 
+
 def read_file_plot_line(h, dt, elements):
-    data_directory = (
-        Path(__file__).parent
-        / "activation_times_data"
-        / f"h={h},dt={dt}"
-    )
-    Lx, Ly, Lz = 3, 7, 20 #mm
-    fig, ax = plt.subplots(figsize=(8,5))
+    data_directory = Path(__file__).parent / "activation_times_data" / f"h={h},dt={dt}"
+    Lx, Ly, Lz = 3, 7, 20  # mm
+    fig, ax = plt.subplots(figsize=(8, 5))
     for element in elements:
         activation_time_line = np.loadtxt(data_directory / element / "line.txt")
         dist = np.linspace(0, np.sqrt(Lx**2 + Ly**2 + Lz**2), len(activation_time_line))
         ax.plot(dist, activation_time_line, label=element)
-    ax.set_ylabel('activation time (ms)')
-    ax.set_xlabel('distance (mm)')
+    ax.set_ylabel("activation time (ms)")
+    ax.set_xlabel("distance (mm)")
     ax.grid(True)
-    ax.set_title('Activation time along line')
+    ax.set_title("Activation time along line")
     ax.legend()
     fig.savefig(f"lineplot_h={h}_dt={dt}.png")
 
+
+h = 0.5
+dt = 0.05
 ode_element = ("Q", 2)
-solve_model_problem(0.2, 0.05, ode_element)
-#read_file_plot_line(h=0.5, dt=0.05, elements=["Lagrange1", "Q2", "Q3", "Q4", "Q5"])
+ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
+
+
+# solve_model_problem(0.2, 0.05, ode_element)
+# read_file_plot_line(h=0.5, dt=0.05, elements=["Lagrange1", "Q2", "Q3", "Q4", "Q5"])
