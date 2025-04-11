@@ -1,5 +1,7 @@
+import cProfile
 import logging
 import os
+import pstats
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -11,7 +13,7 @@ from nmcemfem.monodomain import MonodomainSolver
 
 logging.basicConfig(level=logging.INFO)
 ureg = UnitRegistry()
-
+logger = logging.getLogger(__name__)
 
 initial_states = {
     "V": -85.23,  # mV
@@ -121,27 +123,68 @@ def solve_benchmark(ode_element, skip=[], T=70):
                 solve_model_problem(h, dt, ode_element, T)
 
 
-def read_file_plot_line(h, dt, elements):
+def read_file_plot_line(h, dt):
     data_directory = Path(__file__).parent / "activation_times_data" / f"h={h},dt={dt}"
     Lx, Ly, Lz = 3, 7, 20  # mm
     fig, ax = plt.subplots(figsize=(8, 5))
-    for element in elements:
-        activation_time_line = np.loadtxt(data_directory / element / "line.txt")
+    for element in data_directory.iterdir():
+        activation_time_line = np.loadtxt(element / "line.txt")
         dist = np.linspace(0, np.sqrt(Lx**2 + Ly**2 + Lz**2), len(activation_time_line))
-        ax.plot(dist, activation_time_line, label=element)
+        match element.name:
+            case "Q1":
+                color, linestyle = "r", ":"
+            case "Q3":
+                color, linestyle = "r", "--"
+            case "Q5":
+                color, linestyle = "r", "-"
+            case "DG0":
+                color, linestyle = "b", ":"
+            case "DG1":
+                continue
+                color, linestyle = "b", "--"
+            case "DG2":
+                continue
+                color, linestyle = "b", "-"
+            case "Lagrange1":
+                color, linestyle = "g", "--"
+            case "Lagrange2":
+                color, linestyle = "g", "-"
+        ax.plot(dist, activation_time_line, label=element.name, color=color, linestyle=linestyle)
     ax.set_ylabel("activation time (ms)")
     ax.set_xlabel("distance (mm)")
     ax.grid(True)
-    ax.set_title("Activation time along line")
+    ax.set_title(f"Activation time along line. h = {h}, dt = {dt}")
     ax.legend()
     fig.savefig(f"lineplot_h={h}_dt={dt}.png")
 
-
-h = 0.5
+h = 0.1
 dt = 0.05
-ode_element = ("Q", 2)
-ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
+ode_elements = [("Lagrange", 2), ("Q", 1), ("Q", 3), ("Q", 5)]
+T = 45
+
+for ode_element in ode_elements:
+    solve_model_problem(h, dt, ode_element, T)
+    logger.info(f"Solved for element {ode_element}")
+
+read_file_plot_line(0.5, 0.05)
+read_file_plot_line(0.5, 0.01)
+read_file_plot_line(0.2, 0.05)
+read_file_plot_line(0.1, 0.05)
 
 
-# solve_model_problem(0.2, 0.05, ode_element)
-# read_file_plot_line(h=0.5, dt=0.05, elements=["Lagrange1", "Q2", "Q3", "Q4", "Q5"])
+# def profile():
+#     ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
+#     ep_solver.solve(1.0)
+
+# cProfile.run('profile()', 'profile_output_jit.prof')
+
+# print("Without JIT")
+# p_nojit = pstats.Stats('profile_output.prof')
+# #p_nojit.print_stats("solve_pde_step")
+# #p_nojit.print_stats("solve_ode_step")
+# p_nojit.sort_stats('cumtime').print_stats(10)
+
+# print("With JIT")
+# p_jit = pstats.Stats('profile_output_jit.prof')
+# #p_jit.print_stats("solve_ode_step")
+# p_jit.sort_stats('cumtime').print_stats(10)

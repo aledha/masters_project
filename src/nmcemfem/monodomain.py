@@ -7,10 +7,13 @@ from mpi4py import MPI
 from petsc4py import PETSc
 
 import basix.ufl
+import numba
 import numpy as np
 import ufl
 import ufl.tensors
 from dolfinx import fem, geometry, io, mesh
+from dolfinx.fem.petsc import LinearProblem
+from numba import jit
 
 from nmcemfem.utils import pprint
 
@@ -75,8 +78,7 @@ class PDESolver:
                 phi * (self.v_ode + dt * I_stim) * self.dx
                 - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.v_ode)) * self.dx
             )
-
-        self.solver = fem.petsc.LinearProblem(a, L, u=self.v_pde)
+        self.solver = LinearProblem(a, L, u=self.v_pde)
         fem.petsc.assemble_matrix(self.solver.A, self.solver.a)
         self.solver.A.assemble()
 
@@ -154,6 +156,7 @@ class ODESolver:
         init_params = self.model.init_parameter_values()
         self.params = np.tile(init_params, (num_nodes, 1)).T
         self.odesolver = getattr(self.model, scheme)
+        self.odesolver = jit(nopython=True)(self.odesolver)
 
     def set_param(self, name: str, value: float | np.ndarray):
         """Set parameter
@@ -375,7 +378,6 @@ class MonodomainSolver:
                 if times_line_on_proc[i] < 0 and evaluated_lines[i] > 0:
                     times_line_on_proc[i] = np.round(self.t.value, 3)
                     times_line[indices_line[i]] = times_line_on_proc[i]
-            pprint(f"Solved for t = {np.round(self.t.value, 3)}", self.domain)
 
         times_points_global = np.copy(times_points)
         self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
