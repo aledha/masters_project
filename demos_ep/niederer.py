@@ -77,7 +77,7 @@ def get_model_problem(h, dt, ode_element):
         return ufl.conditional(condition, amplitude_magnitude, 0)
 
     ep_solver.set_stimulus(I_stim)
-    ep_solver.setup_solver()
+    ep_solver.setup_solver("CG")
     return ep_solver, Lx, Ly, Lz
 
 

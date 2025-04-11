@@ -80,6 +80,15 @@ class PDESolver:
             )
         self.solver = LinearProblem(a, L, u=self.v_pde)
         fem.petsc.assemble_matrix(self.solver.A, self.solver.a)
+        if solver_type == "PREONLY":
+            self.solver.solver.setType(PETSc.KSP.Type.PREONLY)
+            self.solver.solver.getPC().setType(PETSc.PC.Type.LU)
+            self.solver.solver.setErrorIfNotConverged(True)
+            self.solver.solver.getPC().setFactorSolverType("mumps")
+        elif solver_type == "CG":
+            self.solver.solver.setErrorIfNotConverged(True)
+            self.solver.solver.setType(PETSc.KSP.Type.CG)
+            self.solver.solver.getPC().setType(PETSc.PC.Type.SOR)
         self.solver.A.assemble()
 
     def solve_pde_step(self):
