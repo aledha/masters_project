@@ -156,9 +156,48 @@ def read_file_plot_line(h, dt):
     save_to_file = f"saved_figures/lineplot_h={h}_dt={dt}.png"
     fig.savefig(save_to_file)
 
-read_file_plot_line(0.1, 0.05)
-read_file_plot_line(0.2, 0.05)
-read_file_plot_line(0.5, 0.05)
+def plot_refinement_lines():
+    hs = [0.5, 0.2, 0.1]
+    dt = 0.05
+    fig, axs = plt.subplots(1, 3, figsize=(12, 5), sharey=True)
+    fig.suptitle(f"Activation time along line for varying h. dt = {dt}")
+
+    for h, ax in zip(hs, axs):
+        data_directory = Path(__file__).parent / "activation_times_data" / f"h={h},dt={dt}"
+        Lx, Ly, Lz = 3, 7, 20  # mm
+        for element in data_directory.iterdir():
+            activation_time_line = np.loadtxt(element / "line.txt")
+            dist = np.linspace(0, np.sqrt(Lx**2 + Ly**2 + Lz**2), len(activation_time_line))
+            match element.name:
+                case "Q1":
+                    color, linestyle = "r", ":"
+                case "Q3":
+                    color, linestyle = "r", "--"
+                case "Q5":
+                    color, linestyle = "r", "-"
+                case "DG0":
+                    color, linestyle = "b", ":"
+                case "Lagrange1":
+                    color, linestyle = "b", "--"
+                case "Lagrange2":
+                    color, linestyle = "b", "-"
+                case "DG1": # Skip DG1, DG2, as these are the same as L1, L2
+                    continue
+                case "DG2":
+                    continue
+            ax.plot(dist, activation_time_line, label=element.name, color=color, linestyle=linestyle)
+        ax.set_xlabel("distance (mm)")
+        ax.grid(True)
+        ax.set_title(f"h = {h}")
+        handles, labels = ax.get_legend_handles_labels()
+        labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
+        ax.legend(handles, labels)
+    fig.supylabel("activation time (ms)")
+    fig.tight_layout()
+    save_to_file = "saved_figures/lineplot.png"
+    fig.savefig(save_to_file)
+
+plot_refinement_lines()
 
 # def profile():
 #     ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
