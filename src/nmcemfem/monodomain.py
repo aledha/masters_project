@@ -375,6 +375,9 @@ class MonodomainSolver:
 
         while self.t.value <= T and np.min(times_points) < 0:
             self.step()
+            if self.domain.comm.rank == 0:
+                logger.info(f"Solved for t = {np.round(self.t.value, 3)}")
+
             evaluated_points = self.pde.v_pde.eval(points_on_proc, cells_points)
             for i in range(len(points_on_proc)):
                 if times_points_on_proc[i] < 0 and evaluated_points[i] > 0:

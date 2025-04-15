@@ -139,38 +139,26 @@ def read_file_plot_line(h, dt):
                 color, linestyle = "r", "-"
             case "DG0":
                 color, linestyle = "b", ":"
-            case "DG1":
-                continue
+            case "Lagrange1":
                 color, linestyle = "b", "--"
+            case "Lagrange2":
+                color, linestyle = "b", "-"
+            case "DG1": # Skip DG1, DG2, as these are the same as L1, L2
+                continue
             case "DG2":
                 continue
-                color, linestyle = "b", "-"
-            case "Lagrange1":
-                color, linestyle = "g", "--"
-            case "Lagrange2":
-                color, linestyle = "g", "-"
         ax.plot(dist, activation_time_line, label=element.name, color=color, linestyle=linestyle)
     ax.set_ylabel("activation time (ms)")
     ax.set_xlabel("distance (mm)")
     ax.grid(True)
     ax.set_title(f"Activation time along line. h = {h}, dt = {dt}")
     ax.legend()
-    fig.savefig(f"lineplot_h={h}_dt={dt}.png")
+    save_to_file = f"saved_figures/lineplot_h={h}_dt={dt}.png"
+    fig.savefig(save_to_file)
 
-h = 0.1
-dt = 0.05
-ode_elements = [("Lagrange", 2), ("Q", 1), ("Q", 3), ("Q", 5)]
-T = 45
-
-for ode_element in ode_elements:
-    solve_model_problem(h, dt, ode_element, T)
-    logger.info(f"Solved for element {ode_element}")
-
-read_file_plot_line(0.5, 0.05)
-read_file_plot_line(0.5, 0.01)
-read_file_plot_line(0.2, 0.05)
 read_file_plot_line(0.1, 0.05)
-
+read_file_plot_line(0.2, 0.05)
+read_file_plot_line(0.5, 0.05)
 
 # def profile():
 #     ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
