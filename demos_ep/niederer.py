@@ -77,7 +77,15 @@ def get_model_problem(h, dt, ode_element):
         return ufl.conditional(condition, amplitude_magnitude, 0)
 
     ep_solver.set_stimulus(I_stim)
-    ep_solver.setup_solver("CG")
+    options = {"ksp_type": "preonly",
+               "pc_type": "lu",
+               "pc_factor_mat_solver_type": "mumps",
+               "ksp_error_if_not_converged": True}
+    # options = {"ksp_type": "cg",
+    #            "pc_type": "sor",
+    #            "ksp_error_if_not_converged": True,
+    #            "ksp_monitor": None}
+    ep_solver.setup_solver(options)
     return ep_solver, Lx, Ly, Lz
 
 
@@ -111,8 +119,15 @@ def solve_model_problem(h, dt, ode_element, T=80):
             os.makedirs(data_directory)
         np.savetxt(data_directory / "points.txt", times_points, fmt="%1.2f")
         np.savetxt(data_directory / "line.txt", times_line, fmt="%1.2f")
-    print(f"Saved for h={h}, dt={dt}")
+        logger.info(f"Saved for h={h}, dt={dt}")
 
+h = 0.5
+dt = 0.005
+T = 45
+ode_elements = [("Lagrange", 2), ("Q", 1), ("DG", 0)]
+
+for ode_element in ode_elements:
+    solve_model_problem(h, dt, ode_element, T)
 
 def solve_benchmark(ode_element, skip=[], T=70):
     hs = [0.5, 0.2, 0.1]
@@ -197,7 +212,7 @@ def plot_refinement_lines():
     save_to_file = "saved_figures/lineplot.png"
     fig.savefig(save_to_file)
 
-plot_refinement_lines()
+#plot_refinement_lines()
 
 # def profile():
 #     ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)

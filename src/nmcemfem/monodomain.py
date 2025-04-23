@@ -7,15 +7,11 @@ from mpi4py import MPI
 from petsc4py import PETSc
 
 import basix.ufl
-import numba
 import numpy as np
 import ufl
 import ufl.tensors
 from dolfinx import fem, geometry, io, mesh
-from dolfinx.fem.petsc import LinearProblem
 from numba import jit
-
-from nmcemfem.utils import pprint
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +51,7 @@ class PDESolver:
         I_stim,
         dt: float,
         theta: float,
-        solver_type: str,
+        petsc_options: dict|None=None,
     ):
         """Initialize PDE solver
 
@@ -78,29 +74,33 @@ class PDESolver:
                 phi * (self.v_ode + dt * I_stim) * self.dx
                 - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.v_ode)) * self.dx
             )
-        self.solver = LinearProblem(a, L, u=self.v_pde)
-        fem.petsc.assemble_matrix(self.solver.A, self.solver.a)
-        if solver_type == "PREONLY":
-            self.solver.solver.setType(PETSc.KSP.Type.PREONLY)
-            self.solver.solver.getPC().setType(PETSc.PC.Type.LU)
-            self.solver.solver.setErrorIfNotConverged(True)
-            self.solver.solver.getPC().setFactorSolverType("mumps")
-        elif solver_type == "CG":
-            self.solver.solver.setErrorIfNotConverged(True)
-            self.solver.solver.setType(PETSc.KSP.Type.CG)
-            self.solver.solver.getPC().setType(PETSc.PC.Type.SOR)
-        self.solver.A.assemble()
+        self._a = fem.form(a)
+        self._L = fem.form(L)
+        self._A = fem.petsc.create_matrix(self._a)
+        self._b = fem.petsc.create_vector(self._L)
+        fem.petsc.assemble_matrix(self._A, self._a)
+        self._A.assemble()
+        options = {} if petsc_options is None else petsc_options
+        opts = PETSc.Options()
+        for key, val in options.items():
+            opts[key] = val
+        self._A.setFromOptions()
+
+        self._solver = PETSc.KSP().create(self.domain.comm)
+        self._solver.setOperators(self._A)
+        self._solver.setFromOptions()
+        self._solver.setUp()
 
     def solve_pde_step(self):
         """Take one step of PDE solver"""
-        with self.solver.b.localForm() as b_loc:
+        with self._b.localForm() as b_loc:
             b_loc.set(0)
-        fem.petsc.assemble_vector(self.solver.b, self.solver.L)
-        self.solver.b.ghostUpdate(
+        fem.petsc.assemble_vector(self._b, self._L)
+        self._b.ghostUpdate(
             addv=PETSc.InsertMode.ADD,
             mode=PETSc.ScatterMode.REVERSE,
         )
-        self.solver.solve()
+        self._solver.solve(self._b, self.v_pde.x.petsc_vec)
         self.v_pde.x.scatter_forward()
         self.v_ode.interpolate(self.v_expr)
 
