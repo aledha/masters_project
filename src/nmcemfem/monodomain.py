@@ -374,8 +374,8 @@ class MonodomainSolver:
         times_line_on_proc = -np.ones(len(line_on_proc))
 
         times_points_global = np.copy(times_points)
-        times_line_global = np.copy(times_line)
-        while self.t.value <= T and np.min(times_line_global) < 0:
+
+        while self.t.value <= T and np.min(times_points_global) < 0:
             self.step()
             if self.domain.comm.rank == 0 and np.round(self.t.value, 3) % 1 == 0:
                 logger.info(f"Solved for t = {np.round(self.t.value, 3)}")
@@ -385,13 +385,13 @@ class MonodomainSolver:
                 if times_points_on_proc[i] < 0 and evaluated_points[i] > 0:
                     times_points_on_proc[i] = np.round(self.t.value, 3)
                     times_points[indices_points[i]] = times_points_on_proc[i]
-                    self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
                     logger.info(f"Point {indices_points[i]} activated")
-
+            self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
             evaluated_lines = self.pde.v_pde.eval(line_on_proc, cells_line)
             for i in range(len(line_on_proc)):
                 if times_line_on_proc[i] < 0 and evaluated_lines[i] > 0:
                     times_line_on_proc[i] = np.round(self.t.value, 3)
                     times_line[indices_line[i]] = times_line_on_proc[i]
-                    self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
+        times_line_global = np.copy(times_line)
+        self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
         return times_points_global, times_line_global

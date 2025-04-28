@@ -85,8 +85,7 @@ def get_model_problem(h, dt, ode_element):
     }
     options = {"ksp_type": "cg",
                "pc_type": "sor",
-               "ksp_error_if_not_converged": True,
-               "ksp_monitor": None}
+               "ksp_error_if_not_converged": True}
     ep_solver.setup_solver(options)
     return ep_solver, Lx, Ly, Lz
 
@@ -124,22 +123,13 @@ def solve_model_problem(h, dt, ode_element, T=80):
         logger.info(f"Saved for h={h}, dt={dt}")
 
 
-h = 0.2
+h = 0.1
 dt = 0.005
 T = 70
-ode_elements = [("Lagrange", 2), ("Q", 1), ("Q", 3), ("Q", 5)]
+ode_elements = [("Lagrange", 2)]
 
-for ode_element in ode_elements:
-    solve_model_problem(h, dt, ode_element, T)
-
-
-def solve_benchmark(ode_element, skip=[], T=70):
-    hs = [0.5, 0.2, 0.1]
-    dts = [0.05, 0.01, 0.005]
-    for h in hs:
-        for dt in dts:
-            if [h, dt] not in skip:
-                solve_model_problem(h, dt, ode_element, T)
+# for ode_element in ode_elements:
+#     solve_model_problem(h, dt, ode_element, T)
 
 
 def read_file_plot_line(h, dt):
@@ -176,9 +166,8 @@ def read_file_plot_line(h, dt):
     fig.savefig(save_to_file)
 
 
-def plot_refinement_lines():
+def plot_refinement_lines(dt):
     hs = [0.5, 0.2, 0.1]
-    dt = 0.05
     fig, axs = plt.subplots(1, 3, figsize=(12, 5), sharey=True)
     fig.suptitle(f"Activation time along line for varying h. dt = {dt}")
 
@@ -216,25 +205,8 @@ def plot_refinement_lines():
         ax.legend(handles, labels)
     fig.supylabel("activation time (ms)")
     fig.tight_layout()
-    save_to_file = "saved_figures/lineplot.png"
+    save_to_file = f"saved_figures/lineplot_dt={dt}.png"
     fig.savefig(save_to_file)
 
 
-# plot_refinement_lines()
-
-# def profile():
-#     ep_solver, Lx, Ly, Lz = get_model_problem(h, dt, ode_element)
-#     ep_solver.solve(1.0)
-
-# cProfile.run('profile()', 'profile_output_jit.prof')
-
-# print("Without JIT")
-# p_nojit = pstats.Stats('profile_output.prof')
-# #p_nojit.print_stats("solve_pde_step")
-# #p_nojit.print_stats("solve_ode_step")
-# p_nojit.sort_stats('cumtime').print_stats(10)
-
-# print("With JIT")
-# p_jit = pstats.Stats('profile_output_jit.prof')
-# #p_jit.print_stats("solve_ode_step")
-# p_jit.sort_stats('cumtime').print_stats(10)
+plot_refinement_lines(dt=0.005)
