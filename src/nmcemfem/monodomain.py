@@ -7,16 +7,18 @@ from mpi4py import MPI
 from petsc4py import PETSc
 
 import basix.ufl
+import dolfinx
+import dolfinx.fem.petsc
 import numpy as np
 import ufl
 import ufl.tensors
-from dolfinx import fem, geometry, io, mesh
 from numba import jit
 
 logger = logging.getLogger(__name__)
 
+
 class PDESolver:
-    def __init__(self, domain: mesh.Mesh, ode_element: tuple[str, int]):
+    def __init__(self, domain: dolfinx.mesh.Mesh, ode_element: tuple[str, int]):
         """Intialize PDESolver instance. PDE space is always ("Lagrange", 1).
 
         Args:
@@ -28,22 +30,22 @@ class PDESolver:
             element = basix.ufl.quadrature_element(
                 cell=self.domain.ufl_cell().cellname(), degree=ode_element[1], scheme="default"
             )
-            self.V_ode = fem.functionspace(domain, element)
+            self.V_ode = dolfinx.fem.functionspace(domain, element)
             self.dx = ufl.dx(domain=self.domain, metadata={"quadrature_degree": ode_element[1]})
         else:
-            self.V_ode = fem.functionspace(domain, ode_element)
+            self.V_ode = dolfinx.fem.functionspace(domain, ode_element)
             self.dx = ufl.dx(domain=self.domain, metadata={"quadrature_degree": 4})
 
         pde_element = ("Lagrange", 1)
-        self.V_pde = fem.functionspace(domain, pde_element)
+        self.V_pde = dolfinx.fem.functionspace(domain, pde_element)
 
-        self.t = fem.Constant(domain, 0.0)
+        self.t = dolfinx.fem.Constant(domain, 0.0)
         self.x = ufl.SpatialCoordinate(domain)
 
-        self.v_ode = fem.Function(self.V_ode)
-        self.v_pde = fem.Function(self.V_pde)
+        self.v_ode = dolfinx.fem.Function(self.V_ode)
+        self.v_pde = dolfinx.fem.Function(self.V_pde)
         self.v_pde.name = "membrane potential"
-        self.v_expr = fem.Expression(self.v_pde, self.V_ode.element.interpolation_points())
+        self.v_expr = dolfinx.fem.Expression(self.v_pde, self.V_ode.element.interpolation_points())
 
     def setup_pde_solver(
         self,
@@ -51,7 +53,7 @@ class PDESolver:
         I_stim,
         dt: float,
         theta: float,
-        petsc_options: dict|None=None,
+        petsc_options: dict | None = None,
     ):
         """Initialize PDE solver
 
@@ -62,7 +64,7 @@ class PDESolver:
             dt (float): timestep
             theta (float): parameter for operator splitting.
                 theta=1/2 gives Strang splitting. theta between 0 and 1.
-            solver_type (str): "PREONLY" for a direct method, "CG" for an iterative method
+            petsc_options (dict): cannot be empty
         """
         v = ufl.TrialFunction(self.V_pde)
         phi = ufl.TestFunction(self.V_pde)
@@ -74,11 +76,11 @@ class PDESolver:
                 phi * (self.v_ode + dt * I_stim) * self.dx
                 - dt * (1 - theta) * ufl.dot(ufl.grad(phi), M * ufl.grad(self.v_ode)) * self.dx
             )
-        self._a = fem.form(a)
-        self._L = fem.form(L)
-        self._A = fem.petsc.create_matrix(self._a)
-        self._b = fem.petsc.create_vector(self._L)
-        fem.petsc.assemble_matrix(self._A, self._a)
+        self._a = dolfinx.fem.form(a)
+        self._L = dolfinx.fem.form(L)
+        self._A = dolfinx.fem.petsc.create_matrix(self._a)
+        self._b = dolfinx.fem.petsc.create_vector(self._L)
+        dolfinx.fem.petsc.assemble_matrix(self._A, self._a)
         self._A.assemble()
         options = {} if petsc_options is None else petsc_options
         opts = PETSc.Options()
@@ -95,7 +97,7 @@ class PDESolver:
         """Take one step of PDE solver"""
         with self._b.localForm() as b_loc:
             b_loc.set(0)
-        fem.petsc.assemble_vector(self._b, self._L)
+        dolfinx.fem.petsc.assemble_vector(self._b, self._L)
         self._b.ghostUpdate(
             addv=PETSc.InsertMode.ADD,
             mode=PETSc.ScatterMode.REVERSE,
@@ -103,6 +105,7 @@ class PDESolver:
         self._solver.solve(self._b, self.v_pde.x.petsc_vec)
         self.v_pde.x.scatter_forward()
         self.v_ode.interpolate(self.v_expr)
+
 
 def compile_ode(odefile, scheme) -> bool:
     try:
@@ -196,11 +199,11 @@ class ODESolver:
         """
         self.states[:] = self.odesolver(self.states, t, dt, self.params)
 
-    def update_v(self, v_ode: fem.Function):
+    def update_v(self, v_ode: dolfinx.fem.Function):
         """Update potential in states
 
         Args:
-            v_ode (fem.Function): potential function in ODE space
+            v_ode (dolfinx.fem.Function): potential function in ODE space
         """
         self.states[self.v_index, :] = v_ode.x.array[:]
 
@@ -236,7 +239,7 @@ class MonodomainSolver:
         """
         self.mesh_comm = MPI.COMM_WORLD
         Lx, Ly, Lz = L
-        self.domain = mesh.create_box(
+        self.domain = dolfinx.mesh.create_box(
             self.mesh_comm,
             [[0, 0, 0], [Lx, Ly, Lz]],
             n=[int(Lx / self.h), int(Ly / self.h), int(Lz / self.h)],
@@ -288,14 +291,9 @@ class MonodomainSolver:
         """
         self.M = M
 
-    def setup_solver(self, solver_type: str = "PREONLY"):
-        """Setup solver. set_conductivity, set_stimulus, and set_cell_model should be called prior.
-
-        Args:
-            solver_type (str, optional): "PREONLY" for a direct method, "CG" for an iterative method
-                Defaults to "PREONLY".
-        """
-        self.pde.setup_pde_solver(self.M, self.I_stim, self.dt, self.theta, solver_type)
+    def setup_solver(self, petsc_options: dict | None = None):
+        """Setup solver. set_conductivity, set_stimulus, and set_cell_model should be called prior."""
+        self.pde.setup_pde_solver(self.M, self.I_stim, self.dt, self.theta, petsc_options)
 
     def _transfer_ode_to_pde(self):
         self.pde.v_ode.x.array[:] = self.ode.get_v()
@@ -334,7 +332,7 @@ class MonodomainSolver:
             t (fem.Constant): time at last timestep.
         """
         if vtx_title:
-            vtx = io.VTXWriter(
+            vtx = dolfinx.io.VTXWriter(
                 MPI.COMM_WORLD, vtx_title.with_suffix(".bp"), [self.pde.v_pde], engine="BP4"
             )
         while self.t.value < T + self.dt:
@@ -345,11 +343,13 @@ class MonodomainSolver:
         return self.pde.v_pde, self.pde.x, self.t
 
     def solve_activation_times(self, points, line, T):
-        bb_tree = geometry.bb_tree(self.domain, self.domain.topology.dim)
+        bb_tree = dolfinx.geometry.bb_tree(self.domain, self.domain.topology.dim)
         # Find cells whose bounding-box collide with the the points
-        potential_colliding_cells_points = geometry.compute_collisions_points(bb_tree, points)
+        potential_colliding_cells_points = dolfinx.geometry.compute_collisions_points(
+            bb_tree, points
+        )
         # Choose one of the cells that contains the point
-        adj_points = geometry.compute_colliding_cells(
+        adj_points = dolfinx.geometry.compute_colliding_cells(
             self.domain, potential_colliding_cells_points, points
         )
         indices_points = np.flatnonzero(adj_points.offsets[1:] - adj_points.offsets[:-1])
@@ -357,9 +357,9 @@ class MonodomainSolver:
         points_on_proc = points[indices_points]
 
         # Find cells whose bounding-box collide with the the points
-        potential_colliding_cells_line = geometry.compute_collisions_points(bb_tree, line)
+        potential_colliding_cells_line = dolfinx.geometry.compute_collisions_points(bb_tree, line)
         # Choose one of the cells that contains the point
-        adj_line = geometry.compute_colliding_cells(
+        adj_line = dolfinx.geometry.compute_colliding_cells(
             self.domain, potential_colliding_cells_line, line
         )
         indices_line = np.flatnonzero(adj_line.offsets[1:] - adj_line.offsets[:-1])
@@ -373,9 +373,11 @@ class MonodomainSolver:
         times_points_on_proc = -np.ones(len(points_on_proc))
         times_line_on_proc = -np.ones(len(line_on_proc))
 
-        while self.t.value <= T and np.min(times_points) < 0:
+        times_points_global = np.copy(times_points)
+        times_line_global = np.copy(times_line)
+        while self.t.value <= T and np.min(times_line_global) < 0:
             self.step()
-            if self.domain.comm.rank == 0:
+            if self.domain.comm.rank == 0 and np.round(self.t.value, 3) % 1 == 0:
                 logger.info(f"Solved for t = {np.round(self.t.value, 3)}")
 
             evaluated_points = self.pde.v_pde.eval(points_on_proc, cells_points)
@@ -383,6 +385,7 @@ class MonodomainSolver:
                 if times_points_on_proc[i] < 0 and evaluated_points[i] > 0:
                     times_points_on_proc[i] = np.round(self.t.value, 3)
                     times_points[indices_points[i]] = times_points_on_proc[i]
+                    self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
                     logger.info(f"Point {indices_points[i]} activated")
 
             evaluated_lines = self.pde.v_pde.eval(line_on_proc, cells_line)
@@ -390,10 +393,5 @@ class MonodomainSolver:
                 if times_line_on_proc[i] < 0 and evaluated_lines[i] > 0:
                     times_line_on_proc[i] = np.round(self.t.value, 3)
                     times_line[indices_line[i]] = times_line_on_proc[i]
-
-        times_points_global = np.copy(times_points)
-        self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
-        times_line_global = np.copy(times_line)
-        self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
-
+                    self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
         return times_points_global, times_line_global

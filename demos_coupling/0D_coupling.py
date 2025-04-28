@@ -1,13 +1,17 @@
 # From https://computationalphysiology.github.io/zero-mech/examples/electro-mechanics/electro_mechanics.html
 from pathlib import Path
 
+from mpi4py import MPI
+
 import matplotlib.pyplot as plt
 import numpy as np
+import ufl
+from dolfinx import fem, io, mesh
 from scipy.optimize import root
 
 from nmcemfem.monodomain import ODESolver
 
-figure_dir = Path(__file__).parents[1] / "saved_figures"
+figure_dir = Path("saved_figures")
 
 
 def subplus(x):
@@ -140,17 +144,42 @@ class zeroD_coupling:
         for axi in ax.flatten():
             axi.grid()
         fig.tight_layout()
-        fig.savefig(figure_dir / filename)
+        fig.savefig(figure_dir / filename.with_suffix(".png"))
+
+    def make_animation(self, filename, T = 400, frame_step = 10):
+        n = 8
+        domain = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n)
+        def u_func(x, lmbda):
+            return [(1 - lmbda) * (1 - x[0]),
+                    - (1 - np.sqrt(lmbda)) * (1 - x[1]),
+                    - (1 - np.sqrt(lmbda)) * (1 - x[2])]
+
+        U = fem.functionspace(domain, ("Lagrange", 2, (3,)))
+        u = fem.Function(U)
+        u.name = "Displacement"
+        vtx = io.VTXWriter(
+                MPI.COMM_WORLD, figure_dir / filename.with_suffix(".bp"), [u], engine="BP4"
+            )
+
+        stop = int(T / self.dt)
+
+        for ti, lmbda in zip(self.t[:stop:frame_step], self.lmbdas[:stop:frame_step]):
+            u.interpolate(lambda x: u_func(x, lmbda))
+            vtx.write(ti)
+        vtx.close()
 
 
 weakcoupling = zeroD_coupling(dt=0.1, T=400)
 weakcoupling.solve_weak()
-weakcoupling.plot("zeroD_weakcoupling.png")
+weakcoupling.plot(Path("zeroD_weak"))
+weakcoupling.make_animation(Path("zeroD_weak"))
 
 strongcoupling = zeroD_coupling(dt=0.1, T=400)
 strongcoupling.solve_strong()
-strongcoupling.plot("zeroD_strongcoupling.png")
+strongcoupling.plot(Path("zeroD_strong"))
+strongcoupling.make_animation(Path("zeroD_strong"), T = 100, frame_step=5)
 
 monolithiccoupling = zeroD_coupling(dt=0.1, T=400)
 monolithiccoupling.solve_monolithic()
-monolithiccoupling.plot("zeroD_monolithic.png")
+monolithiccoupling.plot(Path("zeroD_monolithic"))
+monolithiccoupling.make_animation(Path("zeroD_monolithic"))
