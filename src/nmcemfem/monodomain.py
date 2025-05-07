@@ -1,5 +1,6 @@
 import importlib
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,8 @@ import ufl.tensors
 from numba import jit
 
 logger = logging.getLogger(__name__)
+
+
 
 
 class PDESolver:
@@ -373,25 +376,37 @@ class MonodomainSolver:
         times_points_on_proc = -np.ones(len(points_on_proc))
         times_line_on_proc = -np.ones(len(line_on_proc))
 
+        times_line_global = np.copy(times_line)
         times_points_global = np.copy(times_points)
+
+        time_last_step = time.time()
 
         while self.t.value <= T and np.min(times_points_global) < 0:
             self.step()
-            if self.domain.comm.rank == 0 and np.round(self.t.value, 3) % 1 == 0:
-                logger.info(f"Solved for t = {np.round(self.t.value, 3)}")
-
             evaluated_points = self.pde.v_pde.eval(points_on_proc, cells_points)
             for i in range(len(points_on_proc)):
                 if times_points_on_proc[i] < 0 and evaluated_points[i] > 0:
                     times_points_on_proc[i] = np.round(self.t.value, 3)
                     times_points[indices_points[i]] = times_points_on_proc[i]
                     logger.info(f"Point {indices_points[i]} activated")
-            self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
+
             evaluated_lines = self.pde.v_pde.eval(line_on_proc, cells_line)
             for i in range(len(line_on_proc)):
                 if times_line_on_proc[i] < 0 and evaluated_lines[i] > 0:
                     times_line_on_proc[i] = np.round(self.t.value, 3)
                     times_line[indices_line[i]] = times_line_on_proc[i]
-        times_line_global = np.copy(times_line)
-        self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
+            if np.round(self.t.value, 3) % 1 == 0:
+                self.mesh_comm.Allreduce(times_line, times_line_global, op=MPI.MAX)
+                self.mesh_comm.Allreduce(times_points, times_points_global, op=MPI.MAX)
+
+                # Estimate time left of simulation
+                if self.domain.comm.rank == 0:
+                    time_step = time.time() - time_last_step
+                    steps_left = 40 - self.t.value
+                    time_left = steps_left * time_step
+                    time_left = time.strftime('%H:%M:%S', time.gmtime(time_left))
+                    logger.info(f"Solved for t = {np.round(self.t.value, 3)}")
+                    logger.info(f"Estimated time left = {time_left}")
+                    time_last_step = time.time()
+
         return times_points_global, times_line_global

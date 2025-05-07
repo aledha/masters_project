@@ -146,6 +146,22 @@ class zeroD_coupling:
         fig.tight_layout()
         fig.savefig(figure_dir / filename.with_suffix(".png"))
 
+    def plot_simple(self, filename):
+        fig, ax = plt.subplots(1, 3, figsize=(10,4))
+        ax[0].plot(self.t, self.V)
+        ax[1].plot(self.t, self.Ta)
+        ax[2].plot(self.t, self.lmbdas)
+        ax[0].set_xlabel("Time (ms)")
+        ax[1].set_xlabel("Time (ms)")
+        ax[2].set_xlabel("Time (ms)")
+        ax[0].set_ylabel("v (mV)")
+        ax[1].set_ylabel("Ta (kPa)")
+        ax[2].set_ylabel(r"$\lambda$")
+        for axi in ax.flatten():
+            axi.grid()
+        fig.tight_layout()
+        fig.savefig(figure_dir / filename.with_suffix(".png"))
+
     def make_animation(self, filename, T = 400, frame_step = 10):
         n = 8
         domain = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n)
@@ -154,32 +170,40 @@ class zeroD_coupling:
                     - (1 - np.sqrt(lmbda)) * (1 - x[1]),
                     - (1 - np.sqrt(lmbda)) * (1 - x[2])]
 
+        def v_func(x, v):
+            return x[0] * 0 + v
+
         U = fem.functionspace(domain, ("Lagrange", 2, (3,)))
         u = fem.Function(U)
         u.name = "Displacement"
+
+        V = fem.functionspace(domain, ("Lagrange", 2))
+        v = fem.Function(V)
+        v.name = "Membrane potential"
         vtx = io.VTXWriter(
-                MPI.COMM_WORLD, figure_dir / filename.with_suffix(".bp"), [u], engine="BP4"
+                MPI.COMM_WORLD, figure_dir / filename.with_suffix(".bp"), [u, v], engine="BP4"
             )
 
         stop = int(T / self.dt)
 
-        for ti, lmbda in zip(self.t[:stop:frame_step], self.lmbdas[:stop:frame_step]):
+        for ti, lmbda, vi in zip(self.t[:stop:frame_step], self.lmbdas[:stop:frame_step], self.V[:stop:frame_step]):
             u.interpolate(lambda x: u_func(x, lmbda))
+            v.interpolate(lambda x: v_func(x, vi))
             vtx.write(ti)
         vtx.close()
 
 
 weakcoupling = zeroD_coupling(dt=0.1, T=400)
 weakcoupling.solve_weak()
-weakcoupling.plot(Path("zeroD_weak"))
+weakcoupling.plot_simple(Path("zeroD_weak_simple"))
 weakcoupling.make_animation(Path("zeroD_weak"))
 
 strongcoupling = zeroD_coupling(dt=0.1, T=400)
 strongcoupling.solve_strong()
-strongcoupling.plot(Path("zeroD_strong"))
+strongcoupling.plot_simple(Path("zeroD_strong_simple"))
 strongcoupling.make_animation(Path("zeroD_strong"), T = 100, frame_step=5)
 
 monolithiccoupling = zeroD_coupling(dt=0.1, T=400)
 monolithiccoupling.solve_monolithic()
-monolithiccoupling.plot(Path("zeroD_monolithic"))
+monolithiccoupling.plot_simple(Path("zeroD_monolithic_simple"))
 monolithiccoupling.make_animation(Path("zeroD_monolithic"))

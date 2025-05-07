@@ -128,8 +128,8 @@ dt = 0.005
 T = 70
 ode_elements = [("Lagrange", 2)]
 
-# for ode_element in ode_elements:
-#     solve_model_problem(h, dt, ode_element, T)
+for ode_element in ode_elements:
+    solve_model_problem(h, dt, ode_element, T)
 
 
 def read_file_plot_line(h, dt):
